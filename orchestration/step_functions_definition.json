@@ -1,0 +1,95 @@
+{
+  "Comment": "OET - Orquestração do pipeline de integração de dados (Etapa 2)",
+  "StartAt": "ExtracaoParalela",
+  "States": {
+    "ExtracaoParalela": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ExtrairANEELGD",
+          "States": {
+            "ExtrairANEELGD": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": { "JobName": "oet-extract-aneel-gd" },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairANEELTarifas",
+          "States": {
+            "ExtrairANEELTarifas": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": { "FunctionName": "oet-extract-aneel-tarifas" },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairIBGE",
+          "States": {
+            "ExtrairIBGE": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": { "FunctionName": "oet-extract-ibge-sidra" },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairINMET",
+          "States": {
+            "ExtrairINMET": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": { "FunctionName": "oet-extract-inmet" },
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "TransformarGlueANEELGD"
+    },
+    "TransformarGlueANEELGD": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": { "JobName": "oet-transform-aneel-gd" },
+      "Next": "CarregarRDS",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotificarFalha"
+        }
+      ]
+    },
+    "CarregarRDS": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "oet-load-postgres" },
+      "Next": "AtualizarCatalogoAthena",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotificarFalha"
+        }
+      ]
+    },
+    "AtualizarCatalogoAthena": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startCrawler.sync",
+      "Parameters": { "Name": "oet-trusted-crawler" },
+      "End": true
+    },
+    "NotificarFalha": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:000000000000:oet-pipeline-alertas",
+        "Message": "Falha no pipeline OET — ver logs no CloudWatch."
+      },
+      "End": true
+    }
+  }
+}

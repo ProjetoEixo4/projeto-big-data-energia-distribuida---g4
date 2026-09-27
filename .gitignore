@@ -1,0 +1,22 @@
+# Dados brutos e transformados — não versionar (arquivos grandes, gerados pelos scripts etl/ e transform/)
+data/
+
+# Credenciais e segredos — NUNCA versionar
+.env
+*.csv.part
+*.zip.part
+*.parquet.part
+
+# Ambiente virtual Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+
+# Sistema
+.DS_Store
+Thumbs.db

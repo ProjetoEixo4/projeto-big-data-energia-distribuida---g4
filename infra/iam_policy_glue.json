@@ -1,0 +1,44 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AcessoDataLakeOET",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::oet-datalake-raw",
+        "arn:aws:s3:::oet-datalake-raw/*",
+        "arn:aws:s3:::oet-datalake-trusted",
+        "arn:aws:s3:::oet-datalake-trusted/*"
+      ]
+    },
+    {
+      "Sid": "GlueCatalogEExecucao",
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetDatabase",
+        "glue:GetTable",
+        "glue:GetPartitions",
+        "glue:CreateTable",
+        "glue:UpdateTable",
+        "glue:BatchCreatePartition"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LogsCloudWatch",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:/aws-glue/*"
+    }
+  ]
+}
