@@ -1,13 +1,6 @@
 """
 Extração — IBGE PIB por UF
-Consulta a API SIDRA, tabela 5938 (Produto Interno Bruto a preços correntes),
-no nível geográfico n3 = Unidade da Federação.
 
-Essa é a MESMA tabela usada anteriormente para o PIB dos Municípios (nível
-n6), só que agora consultada no nível estadual (n3), com a variável 37
-(PIB a preços correntes). A tabela 6784 (Contas Regionais) foi descartada
-porque a API retorna 400 Bad Request para a combinação de parâmetros que
-o projeto precisa — a 5938 cobre a mesma necessidade sem esse problema.
 
 Uso:
     python etl/extract_ibge_contas_regionais.py --anos 2020 2021 2022 2023
