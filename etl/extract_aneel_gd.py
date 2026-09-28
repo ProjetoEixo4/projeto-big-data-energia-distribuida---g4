@@ -1,11 +1,6 @@
 """
 Extração — ANEEL Geração Distribuída (GD)
-Baixa o arquivo Parquet consolidado nacional de empreendimentos de geração
-distribuída, disponível no portal de dados abertos da ANEEL.
 
-Este é o maior arquivo do projeto (fonte da tabela fato principal). O
-download usa streaming com barra de progresso; se o servidor não informar
-o tamanho total, o progresso é mostrado em MB acumulados mesmo assim.
 
 Uso:
     python etl/extract_aneel_gd.py
