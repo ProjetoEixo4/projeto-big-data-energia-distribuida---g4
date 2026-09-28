@@ -1,22 +1,6 @@
 """
 Extração — EPE Balanço Energético Nacional (BEN)
 
-IMPORTANTE: diferente das demais fontes, o BEN não tem uma URL de download
-direto e estável — os dados tabulares (formato tidyverse) ficam dentro de
-um dashboard interativo (https://dashboard.epe.gov.br/apps/livro-ben/),
-onde é preciso escolher o ano-base e clicar em "download" manualmente.
-
-Este script NÃO baixa da internet. Ele organiza um arquivo que você já
-baixou manualmente do dashboard, copiando-o para a estrutura padrão da
-camada raw — assim o restante do pipeline (transformação, carga) trata
-essa fonte exatamente como as outras.
-
-Uso:
-    1. Acesse https://dashboard.epe.gov.br/apps/livro-ben/#anexo
-    2. Escolha o ano-base desejado (ex.: 2025, que traz dados de 2024)
-    3. Baixe o arquivo (xlsx ou csv) para a pasta Downloads
-    4. Rode:
-       python etl/extract_epe_ben.py --arquivo ~/Downloads/ben_anexo_2025.xlsx --ano-base 2025
 """
 import argparse
 import shutil
