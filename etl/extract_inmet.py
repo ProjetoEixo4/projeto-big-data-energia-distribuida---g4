@@ -1,19 +1,10 @@
 """
 Extração — INMET Banco de Dados Meteorológicos (BDMEP)
-Baixa os arquivos ZIP anuais do portal de dados históricos do INMET.
-Cada ZIP contém um CSV por estação automática (500+ arquivos por ano).
 
 Uso:
     python etl/extract_inmet.py --ano-inicio 2020 --ano-fim 2025
 
-Nota: o download é feito ANO A ANO, sem filtro de estação — a seletividade
-(agregação por UF) acontece na fase de transformação, para preservar o
-dado bruto integralmente na camada raw.
 
-Cada ano é baixado com progresso em MB e gravado primeiro num arquivo
-temporário (.part); só é renomeado para o nome final se o download
-terminar completo. Assim, se você interromper no meio, o script não
-acha erroneamente que aquele ano já está pronto na próxima execução.
 """
 import argparse
 import sys
