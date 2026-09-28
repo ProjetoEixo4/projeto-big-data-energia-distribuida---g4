@@ -5,8 +5,7 @@ e grava em data/trusted/<entidade>/ como Parquet particionado por ano (e UF,
 quando aplicável). Em produção (AWS), a mesma lógica roda como um AWS Glue Job
 (ver glue/glue_job_aneel_gd.py) lendo/gravando em S3 em vez de disco local.
 
-Escopo do projeto (definido com o orientador): recorte temporal 2020-2025.
-"""
+
 import os
 
 import pandas as pd
