@@ -31,7 +31,7 @@ Ver `docs/architecture.png` para o diagrama completo e `sql/` para o modelo dime
 
 ## Recorte temporal do projeto
 
-Em conversa com o orientador, o grupo definiu delimitar o projeto ao período de
+Definiu-se delimitar o projeto ao período de
 **2020 a 2025**, usando cinco fontes: ANEEL (Geração Distribuída e Tarifas), EPE
 (BEN), INMET (BDMEP) e IBGE (PIB dos Municípios/SIDRA). O filtro temporal é
 aplicado tanto na extração (quando a fonte permite, como INMET e IBGE) quanto na
@@ -44,19 +44,18 @@ transformação (como camada de segurança para todas as fontes — ver
   mais recente (dez/2025) cobre até 2023 — 2024 e 2025 ficarão sem esse
   indicador até novas divulgações do IBGE.
 - **EPE — BEN**: publicado com defasagem de 1 ano em relação ao ano-base. A
-  edição com dados completos de 2025 só estará disponível em 2026.
+  edição com dados completos.
 
 ## Nota sobre ABSOLAR e Greener
 
 Essas duas fontes foram avaliadas na Etapa 1 como possíveis fontes complementares de
 custo de instalação (preço por watt-pico), mas **excluídas do pipeline automatizado**:
 
-- **ABSOLAR** exige cadastro prévio para acesso à base — solicitado pelo grupo, sem resposta.
+- **ABSOLAR** exige cadastro prévio para acesso à base — solicitado, sem resposta.
 - **Greener** não publica seus estudos em formato aberto e estruturado.
 
 A dimensão de custo é tratada, em vez disso, por (i) um indicador indireto calculado a
-partir da própria ANEEL (taxa de crescimento da potência instalada, como proxy de
-maturidade de mercado) e (ii) citação pontual de literatura secundária que já reproduz
+partir da própria ANEEL (taxa de crescimento da potência instalada e (ii) citação pontual de literatura secundária que já reproduz
 números da ABSOLAR (ex.: imprensa especializada, publicações do BNDES), sem necessidade
 de acesso direto à fonte primária. A tabela `oet.apoio_custo_instalacao` (ver
 `sql/02_facts.sql`) é mantida no modelo apenas como registro de referência desses valores
@@ -119,5 +118,3 @@ python etl/load_postgres.py
 
 ## Links
 
-- Repositório: `[PREENCHER — link do GitHub do grupo após o push]`
-- Documento completo da Etapa 2 (PDF/DOCX): ver entrega no AVA.
