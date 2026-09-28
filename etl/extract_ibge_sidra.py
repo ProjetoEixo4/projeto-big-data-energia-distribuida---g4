@@ -2,15 +2,6 @@
 Extração — IBGE | SIDRA API (PIB municipal e população)
 Fonte: https://sidra.ibge.gov.br/
 
-Ao contrário das demais fontes, o IBGE é consultado via API REST (JSON),
-não requer download de arquivo bruto. Consulta a tabela 5938 (PIB dos
-Municípios) para o recorte 2020-2025 definido com o orientador.
-
-RESSALVA IMPORTANTE: o PIB dos Municípios tem defasagem de divulgação de
-aproximadamente 2 anos. A edição mais recente disponível (dez/2025) cobre
-apenas até o ano de 2023 — os anos de 2024 e 2025 ficarão ausentes desta
-fonte até que o IBGE publique novas edições. Essa lacuna é uma limitação
-conhecida do projeto (ver Etapa 1, item 1.2), não um erro de extração.
 """
 import datetime as dt
 import json
