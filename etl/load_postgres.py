@@ -1,31 +1,6 @@
 """
 Carga — data/trusted/*.csv -> RDS PostgreSQL
 
-Lê os CSVs gerados pelos scripts de transformação e carrega nas 9 tabelas
-do modelo dimensional (sql/01_ddl_modelo_dimensional.sql), respeitando a
-ordem de dependência de chave estrangeira:
-
-    1. dim_tempo, dim_uf, dim_fonte_energia   (de seed_dimensoes.py)
-    2. dim_distribuidora                       (de transform_geracao_uf.py)
-    3. dim_modalidade                          (de transform_geracao_uf.py — chave
-                                                 artificial SERIAL resolvida aqui)
-    4. dim_clima_uf                            (de transform_clima_uf.py)
-    5. fato_geracao_uf, fato_tarifa,
-       fato_matriz_energetica
-
-Todas as cargas são UPSERT (INSERT ... ON CONFLICT), então rodar o script
-de novo não duplica linhas — é seguro re-executar depois de uma extração
-incremental.
-
-Credenciais: lidas de variáveis de ambiente (arquivo .env na raiz do repo,
-carregado via python-dotenv). Nunca coloque a senha direto no código.
-Crie um arquivo .env (não versionado — já deve estar no .gitignore) com:
-
-    DB_HOST=database-1.cz6qmscu0whx.sa-east-1.rds.amazonaws.com
-    DB_PORT=5432
-    DB_NAME=postgres
-    DB_USER=eixo4g3
-    DB_PASSWORD=sua_senha_aqui
 
 Uso:
     python etl/load_postgres.py
