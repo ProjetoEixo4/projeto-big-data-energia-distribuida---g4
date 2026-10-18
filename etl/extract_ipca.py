@@ -1,7 +1,7 @@
 """
 Extração — IBGE SIDRA, IPCA (tabela 1737, variável 2266: número-índice, dez/1993 = 100)
 
-Usado para deflacionar a tarifa de energia (transform_tarifa.py): sem isso,
+Usamos para deflacionar a tarifa de energia (transform_tarifa.py): sem isso,
 "a tarifa subiu" mistura aumento real com inflação geral.
 
 Uso:
