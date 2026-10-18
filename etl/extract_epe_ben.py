@@ -1,22 +1,16 @@
 """
 Extração — EPE Balanço Energético Nacional (BEN), "matriz em unidades comerciais"
 
-O BEN não tem URL de download estável: os arquivos saem do portal de dados abertos
-da EPE (https://www.epe.gov.br/pt/publicacoes-dados-abertos/dados-abertos) após
-escolher o ano — por isso esta etapa é MANUAL e NÃO baixa da internet. O script
+O BEN não tem URL de download estável processo foi MANUAL e NÃO baixa da internet. O script
 apenas organiza os arquivos já baixados na estrutura padrão da camada raw.
 
-Arquivo usado: matriz_balanco_energitico_unidades_comerciais_AAAA.xlsx
-(uma matriz nacional por ano; as colunas "Hidráulica - GWh", "Eólica - GWh" e
-"Solar Fotovoltaica - GWh" e a coluna "Eletricidade - GWh" permitem montar a
-geração elétrica por fonte — ver transform_matriz_energetica.py).
 
-Uso (importa todos os anos de uma pasta de uma vez):
+Uso (importamos todos os anos de uma pasta de uma vez):
     python etl/extract_epe_ben.py --pasta "C:/Users/lucas/Downloads/projeto Eixo 4/EPE"
 Ou um arquivo só:
     python etl/extract_epe_ben.py --arquivo caminho/arquivo.xlsx --ano-base 2025
 
-Para a nuvem: depois de organizar, envie data/raw/epe_ben/ ao bucket RAW
+Para a nuvem: depois de organizar, enviamos data/raw/epe_ben/ ao bucket RAW
 (aws s3 sync data/raw/epe_ben s3://projeto-eixo4-g3-raw/epe_ben) — o pipeline lê de lá.
 """
 from __future__ import annotations
