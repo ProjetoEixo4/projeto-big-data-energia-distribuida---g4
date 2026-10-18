@@ -1,40 +1,75 @@
 """
-Extração — EPE Balanço Energético Nacional (BEN)
+Extração — EPE Balanço Energético Nacional (BEN), "matriz em unidades comerciais"
 
+O BEN não tem URL de download estável: os arquivos saem do portal de dados abertos
+da EPE (https://www.epe.gov.br/pt/publicacoes-dados-abertos/dados-abertos) após
+escolher o ano — por isso esta etapa é MANUAL e NÃO baixa da internet. O script
+apenas organiza os arquivos já baixados na estrutura padrão da camada raw.
+
+Arquivo usado: matriz_balanco_energitico_unidades_comerciais_AAAA.xlsx
+(uma matriz nacional por ano; as colunas "Hidráulica - GWh", "Eólica - GWh" e
+"Solar Fotovoltaica - GWh" e a coluna "Eletricidade - GWh" permitem montar a
+geração elétrica por fonte — ver transform_matriz_energetica.py).
+
+Uso (importa todos os anos de uma pasta de uma vez):
+    python etl/extract_epe_ben.py --pasta "C:/Users/lucas/Downloads/projeto Eixo 4/EPE"
+Ou um arquivo só:
+    python etl/extract_epe_ben.py --arquivo caminho/arquivo.xlsx --ano-base 2025
+
+Para a nuvem: depois de organizar, envie data/raw/epe_ben/ ao bucket RAW
+(aws s3 sync data/raw/epe_ben s3://projeto-eixo4-g3-raw/epe_ben) — o pipeline lê de lá.
 """
+from __future__ import annotations
+
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
 
 RAW_DIR = Path("data/raw/epe_ben")
+PADRAO = re.compile(r"matriz_balanco_energitico_unidades_comerciais_(\d{4})\.xlsx$", re.IGNORECASE)
 
 
-def organizar_arquivo_manual(arquivo_origem: Path, ano_base: str, out_dir: Path) -> Path:
-    if not arquivo_origem.exists():
-        raise FileNotFoundError(
-            f"Arquivo não encontrado: {arquivo_origem}\n"
-            "Baixe primeiro pelo dashboard: https://dashboard.epe.gov.br/apps/livro-ben/#anexo"
-        )
-
+def importar_pasta(pasta: Path, out_dir: Path) -> list[Path]:
+    achados = sorted((int(m.group(1)), p) for p in pasta.iterdir() if (m := PADRAO.search(p.name)))
+    if not achados:
+        raise FileNotFoundError(f"nenhum 'matriz_balanco_energitico_unidades_comerciais_AAAA.xlsx' em {pasta}")
     out_dir.mkdir(parents=True, exist_ok=True)
-    extensao = arquivo_origem.suffix
-    out_file = out_dir / f"ben_{ano_base}{extensao}"
-    shutil.copy2(arquivo_origem, out_file)
+    saidas = []
+    for ano, origem in achados:
+        destino = out_dir / f"ben_comerciais_{ano}.xlsx"
+        shutil.copy2(origem, destino)
+        print(f"[extract_epe_ben] {origem.name} -> {destino}")
+        saidas.append(destino)
+    return saidas
 
-    print(f"[extract_epe_ben] arquivo do ano-base {ano_base} organizado em {out_file}")
-    return out_file
+
+def importar_arquivo(origem: Path, ano: str, out_dir: Path) -> Path:
+    if not origem.exists():
+        raise FileNotFoundError(f"arquivo não encontrado: {origem}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    destino = out_dir / f"ben_comerciais_{ano}{origem.suffix}"
+    shutil.copy2(origem, destino)
+    print(f"[extract_epe_ben] {origem.name} -> {destino}")
+    return destino
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Organização do BEN (EPE) — download manual")
-    parser.add_argument("--arquivo", required=True, help="Caminho do arquivo baixado manualmente do dashboard")
-    parser.add_argument("--ano-base", required=True, help="Ano-base dos dados (ex.: 2025 para o BEN 2026)")
-    parser.add_argument("--out-dir", default=str(RAW_DIR))
-    args = parser.parse_args()
-
+    ap = argparse.ArgumentParser(description="Organização do BEN (EPE) — arquivos baixados manualmente")
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--pasta", help="pasta com os arquivos matriz_balanco_energitico_unidades_comerciais_AAAA.xlsx")
+    g.add_argument("--arquivo", help="um arquivo isolado (use com --ano-base)")
+    ap.add_argument("--ano-base", help="ano de referência do arquivo isolado")
+    ap.add_argument("--out-dir", default=str(RAW_DIR))
+    a = ap.parse_args()
     try:
-        organizar_arquivo_manual(Path(args.arquivo).expanduser(), args.ano_base, Path(args.out_dir))
+        if a.pasta:
+            importar_pasta(Path(a.pasta).expanduser(), Path(a.out_dir))
+        else:
+            if not a.ano_base:
+                ap.error("--arquivo exige --ano-base")
+            importar_arquivo(Path(a.arquivo).expanduser(), a.ano_base, Path(a.out_dir))
     except FileNotFoundError as e:
         print(f"[extract_epe_ben] ERRO: {e}", file=sys.stderr)
         sys.exit(1)

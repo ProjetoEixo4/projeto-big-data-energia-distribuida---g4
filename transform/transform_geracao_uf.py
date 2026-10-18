@@ -1,135 +1,220 @@
 """
-Transformação — ANEEL Geração Distribuída → fato_geracao_uf (+ dim_distribuidora, dim_modalidade)
+Transformação — ANEEL Geração Distribuída → fato_geracao_uf (+ dim_distribuidora,
+dim_distribuidora_uf)
 
-O arquivo bruto da ANEEL (empreendimento-geracao-distribuida.parquet) é um
-CADASTRO — uma fotografia do estado atual de todas as usinas de geração
-distribuída registradas, não uma série histórica mês a mês. Ele não tem uma
-coluna de "data de conexão"; o campo mais próximo disso é
-DthAtualizaCadastralEmpreend (data da última atualização cadastral do
-empreendimento), que na prática reflete o mês em que o cadastro foi criado
-ou modificado. Usamos esse campo como proxy do período de referência —
-é a mesma abordagem usada em estudos setoriais que reconstroem a evolução
-temporal da GD a partir dessa base cadastral, já que a ANEEL não publica
-outra fonte com granularidade mensal completa 2020-2025.
+O arquivo bruto (empreendimento-geracao-distribuida.parquet) é um CADASTRO:
+uma fotografia atual das usinas, sem data de conexão. Para reconstruir a série
+mensal 2020-2025 o pipeline usa, nesta ordem de preferência:
 
-Mapeamento de tipo_consumidor (dim_modalidade), simplificado a partir das
-colunas disponíveis:
-    - DscClasseConsumo == 'Rural'            -> 'Rural'
-    - DscModalidadeHabilitado == 'Condomínio' -> 'Multifamiliar'
-    - SigTipoConsumidor == 'PF' (pessoa física) -> 'Unifamiliar'
-    - qualquer outro caso                     -> 'Outro'
+    1. DatConexao da tabela técnica fotovoltaica da ANEEL (extract_aneel_gd_tecnico.py),
+       ligada por CodEmpreendimento = CodGeracaoDistribuida — data real de conexão;
+    2. (fallback, só para usinas sem correspondência ou se o arquivo técnico não
+       foi baixado) DthAtualizaCadastralEmpreend, que mede a última atualização
+       do cadastro e NÃO a conexão. O relatório de qualidade registra quantos %
+       das usinas e da potência caíram em cada caso; sem o arquivo técnico a série
+       fica marcada como `serie_aproximada = true`.
+
+Decisões de modelagem (todas visíveis no relatório de qualidade):
+    - Escopo SOLAR: só SigTipoGeracao == 'UFV' (99,98 % do cadastro). O projeto
+      trata de energia solar distribuída; misturar eólica/térmica/hidro (≈0,02 %)
+      distorceria o conceito sem ganho analítico.
+    - O fato é um ESTOQUE ACUMULADO mensal, não um fluxo de "cadastros do mês":
+      potência instalada e nº de conexões acumulados até o fim de cada mês, mais
+      as colunas de fluxo (novas conexões no mês). Usinas conectadas antes de
+      jan/2020 entram no saldo inicial. A grade é completa (todo mês para toda
+      combinação UF×modalidade que existe), então não há "buracos" na série.
+    - Datas anteriores a 2012 (início da REN 482) ou posteriores ao último mês do
+      recorte são consideradas inválidas (ex.: 1900-01-01) e a usina cai no fallback.
 
 Uso:
     python transform/transform_geracao_uf.py
-Gera:
-    data/trusted/dim_distribuidora.csv
-    data/trusted/dim_modalidade.csv
-    data/trusted/fato_geracao_uf.csv
+Gera (Parquet, camada trusted):
+    dim_distribuidora, dim_distribuidora_uf, fato_geracao_uf, _qualidade_geracao.json
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-RAW_FILE = Path("data/raw/aneel_gd/empreendimento-geracao-distribuida.parquet")
-TRUSTED_DIR = Path("data/trusted")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from oet.io import ler_trusted, raw_dir, salvar_relatorio, salvar_trusted  # noqa: E402
 
-ANO_INICIO = 2020
-ANO_FIM = 2025
+ANO_INICIO, ANO_FIM = 2020, 2025
+DATA_MIN_VALIDA = pd.Timestamp("2012-04-17")   # REN 482/2012 em vigor
+PRIMEIRO_MES = pd.Period(f"{ANO_INICIO}-01", "M")
+ULTIMO_MES = pd.Period(f"{ANO_FIM}-12", "M")
 
 COLUNAS = [
-    "NumCNPJDistribuidora", "SigAgente", "NomAgente", "SigUF",
-    "DthAtualizaCadastralEmpreend", "DscModalidadeHabilitado",
-    "DscClasseConsumo", "SigTipoConsumidor", "MdaPotenciaInstaladaKW",
-    "CodEmpreendimento",
+    "NumCNPJDistribuidora", "NomAgente", "SigUF", "SigTipoGeracao",
+    "DthAtualizaCadastralEmpreend", "DscModalidadeHabilitado", "DscClasseConsumo",
+    "MdaPotenciaInstaladaKW", "CodEmpreendimento",
 ]
 
+_MODALIDADE_NORM = {
+    "geracao na propria uc": "Geração na própria UC",
+    "auto consumo remoto": "Autoconsumo remoto",
+    "autoconsumo remoto": "Autoconsumo remoto",
+    "compartilhada": "Compartilhada",
+    "condominio": "Condomínio",
+    "condomínio": "Condomínio",
+}
+_CLASSE_NORM = {
+    "residencial": "Residencial", "rebr": "Residencial baixa renda", "comercial": "Comercial",
+    "industrial": "Industrial", "rural": "Rural", "poder público": "Poder Público",
+    "serviço público": "Serviço Público", "iluminação pública": "Iluminação pública",
+    "consumo próprio": "Consumo próprio",
+}
 
-def classificar_tipo_consumidor(row) -> str:
-    if row["DscClasseConsumo"] == "Rural":
-        return "Rural"
-    if row["DscModalidadeHabilitado"] == "Condomínio":
-        return "Multifamiliar"
-    if row["SigTipoConsumidor"] == "PF":
-        return "Unifamiliar"
-    return "Outro"
+
+def normalizar_modalidade(s: pd.Series) -> pd.Series:
+    return s.fillna("").str.strip().str.lower().map(_MODALIDADE_NORM).fillna("Não informado")
 
 
-def transformar() -> None:
-    if not RAW_FILE.exists():
-        print(f"[transform_geracao_uf] ERRO: arquivo não encontrado: {RAW_FILE}. "
-              "Rode etl/extract_aneel_gd.py primeiro.", file=sys.stderr)
-        sys.exit(1)
+def normalizar_classe(s: pd.Series) -> pd.Series:
+    return s.fillna("").str.strip().str.lower().map(_CLASSE_NORM).fillna("Outras")
 
-    print(f"[transform_geracao_uf] lendo {RAW_FILE} ...")
-    df = pd.read_parquet(RAW_FILE, engine="pyarrow", columns=COLUNAS)
-    print(f"[transform_geracao_uf] {len(df):,} registros lidos")
 
-    # --- dim_distribuidora: uma linha por CNPJ, UF = moda das UFs atendidas ---
-    dist = (
-        df.dropna(subset=["NumCNPJDistribuidora"])
-        .groupby("NumCNPJDistribuidora")
-        .agg(
-            nome_distribuidora=("NomAgente", lambda s: s.mode().iat[0] if not s.mode().empty else s.iloc[0]),
-            cod_uf_principal=("SigUF", lambda s: s.mode().iat[0] if not s.mode().empty else None),
-        )
-        .reset_index()
-        .rename(columns={"NumCNPJDistribuidora": "cod_distribuidora"})
-    )
-    dist["cod_distribuidora"] = dist["cod_distribuidora"].astype(str)
-    dist.to_csv(TRUSTED_DIR / "dim_distribuidora.csv", index=False)
-    print(f"[transform_geracao_uf] dim_distribuidora: {len(dist)} distribuidoras")
+def carregar_datas_conexao() -> pd.DataFrame | None:
+    arquivos = sorted(raw_dir("aneel_gd_tecnico").glob("*.parquet"))
+    if not arquivos:
+        return None
+    df = pd.read_parquet(arquivos[-1])
+    cols = {c.lower(): c for c in df.columns}
+    c_cod, c_dat = cols.get("codgeracaodistribuida"), cols.get("datconexao")
+    if c_cod is None or c_dat is None:
+        raise RuntimeError(f"arquivo técnico sem CodGeracaoDistribuida/DatConexao: {list(df.columns)}")
+    out = df[[c_cod, c_dat]].rename(columns={c_cod: "CodEmpreendimento", c_dat: "DatConexao"})
+    out["DatConexao"] = pd.to_datetime(out["DatConexao"], errors="coerce")
+    return out.dropna(subset=["CodEmpreendimento"]).drop_duplicates("CodEmpreendimento")
 
-    # --- filtro temporal (2020-2025), a partir do proxy DthAtualizaCadastralEmpreend ---
-    df["dt_ref"] = pd.to_datetime(df["DthAtualizaCadastralEmpreend"], errors="coerce")
-    df = df[df["dt_ref"].dt.year.between(ANO_INICIO, ANO_FIM)]
-    df["id_tempo"] = df["dt_ref"].dt.year * 100 + df["dt_ref"].dt.month
-    print(f"[transform_geracao_uf] {len(df):,} registros após filtro temporal {ANO_INICIO}-{ANO_FIM}")
 
-    # --- dim_modalidade: combinações distintas observadas ---
-    df["tipo_consumidor"] = df.apply(classificar_tipo_consumidor, axis=1)
-    df["DscModalidadeHabilitado"] = df["DscModalidadeHabilitado"].fillna("Não informado")
-    df["DscClasseConsumo"] = df["DscClasseConsumo"].fillna("Não informado")
+def definir_mes_de_entrada(df: pd.DataFrame, tecnico: pd.DataFrame | None) -> tuple[pd.DataFrame, dict]:
+    """Atribui `mes_entrada` (Period M) a cada usina e informa a origem da data."""
+    df = df.copy()
+    df["dt_cadastro"] = pd.to_datetime(df["DthAtualizaCadastralEmpreend"], errors="coerce")
+    df["dt_conexao"] = pd.NaT
+    if tecnico is not None:
+        df = df.merge(tecnico, on="CodEmpreendimento", how="left")
+        df["dt_conexao"] = df["DatConexao"]
+        df = df.drop(columns="DatConexao")
 
-    modalidades = (
-        df[["DscModalidadeHabilitado", "DscClasseConsumo", "tipo_consumidor"]]
-        .drop_duplicates()
-        .rename(columns={
-            "DscModalidadeHabilitado": "modalidade_aneel",
-            "DscClasseConsumo": "classe_consumo",
-        })
-        .reset_index(drop=True)
-    )
-    modalidades.insert(0, "id_modalidade_natural", range(1, len(modalidades) + 1))
-    modalidades.to_csv(TRUSTED_DIR / "dim_modalidade.csv", index=False)
-    print(f"[transform_geracao_uf] dim_modalidade: {len(modalidades)} combinações distintas")
+    limite = ULTIMO_MES.end_time
+    ok_con = df["dt_conexao"].between(DATA_MIN_VALIDA, limite)
+    ok_cad = df["dt_cadastro"].between(DATA_MIN_VALIDA, limite)
+    df["origem_data"] = np.where(ok_con, "conexao", np.where(ok_cad, "cadastro", "invalida"))
+    df["dt_ref"] = df["dt_conexao"].where(ok_con, df["dt_cadastro"].where(ok_cad))
+    df = df.dropna(subset=["dt_ref"])  # sem nenhuma data utilizável
+    df["mes_entrada"] = df["dt_ref"].dt.to_period("M")
 
-    df = df.merge(
-        modalidades,
-        left_on=["DscModalidadeHabilitado", "DscClasseConsumo", "tipo_consumidor"],
-        right_on=["modalidade_aneel", "classe_consumo", "tipo_consumidor"],
-        how="left",
-    )
+    pot = df["MdaPotenciaInstaladaKW"].fillna(0)
+    resumo = {
+        "usinas_com_data": int(len(df)),
+        "pct_usinas_data_conexao": float(round(100 * (df["origem_data"] == "conexao").mean(), 2)) if len(df) else 0.0,
+        "pct_potencia_data_conexao": float(round(100 * pot[df["origem_data"] == "conexao"].sum() / pot.sum(), 2)) if pot.sum() else 0.0,
+        "arquivo_tecnico_presente": tecnico is not None,
+    }
+    resumo["serie_aproximada"] = bool(resumo["pct_potencia_data_conexao"] < 90.0)
+    return df, resumo
 
-    # --- fato_geracao_uf: agregação por id_tempo x cod_uf x modalidade ---
-    fato = (
-        df.dropna(subset=["SigUF"])
-        .groupby(["id_tempo", "SigUF", "id_modalidade_natural"])
-        .agg(
-            potencia_total_kw=("MdaPotenciaInstaladaKW", "sum"),
-            qtd_conexoes=("CodEmpreendimento", "count"),
-        )
-        .reset_index()
-        .rename(columns={"SigUF": "cod_uf"})
-    )
-    fato["potencia_media_kw"] = (fato["potencia_total_kw"] / fato["qtd_conexoes"]).round(2)
-    fato["potencia_total_kw"] = fato["potencia_total_kw"].round(2)
 
-    fato.to_csv(TRUSTED_DIR / "fato_geracao_uf.csv", index=False)
-    print(f"[transform_geracao_uf] fato_geracao_uf: {len(fato):,} linhas agregadas")
-    print("[transform_geracao_uf] concluído.")
+def construir_fato(df: pd.DataFrame) -> pd.DataFrame:
+    """Estoque acumulado + fluxo mensal por (id_tempo, cod_uf, id_modalidade)."""
+    dim_mod = ler_trusted("dim_modalidade")
+    chave = dim_mod.set_index(["modalidade_aneel", "classe_consumo"])["id_modalidade"]
+    df = df.copy()
+    df["modalidade_aneel"] = normalizar_modalidade(df["DscModalidadeHabilitado"])
+    df["classe_consumo"] = normalizar_classe(df["DscClasseConsumo"])
+    df["id_modalidade"] = chave.reindex(pd.MultiIndex.from_frame(df[["modalidade_aneel", "classe_consumo"]])).to_numpy()
+
+    meses = pd.period_range(PRIMEIRO_MES, ULTIMO_MES, freq="M")
+    ids = [m.year * 100 + m.month for m in meses]
+    df["pot"] = df["MdaPotenciaInstaladaKW"].fillna(0.0)
+    df["mes_idx"] = (df["mes_entrada"] - PRIMEIRO_MES).apply(lambda x: x.n)
+
+    # saldo anterior a jan/2020 (mes_idx < 0) e fluxo por mês (0..71)
+    antes = df[df["mes_idx"] < 0].groupby(["SigUF", "id_modalidade"]).agg(pot0=("pot", "sum"), qtd0=("pot", "size"))
+    dentro = df[df["mes_idx"] >= 0]
+    fluxo = dentro.groupby(["SigUF", "id_modalidade", "mes_idx"]).agg(pot_nova=("pot", "sum"), qtd_nova=("pot", "size"))
+
+    combos = df[["SigUF", "id_modalidade"]].drop_duplicates()
+    grade = (combos.assign(k=1).merge(pd.DataFrame({"mes_idx": range(len(meses)), "k": 1}), on="k").drop(columns="k"))
+    grade = grade.merge(fluxo.reset_index(), on=["SigUF", "id_modalidade", "mes_idx"], how="left")
+    grade[["pot_nova", "qtd_nova"]] = grade[["pot_nova", "qtd_nova"]].fillna(0)
+    grade = grade.merge(antes.reset_index(), on=["SigUF", "id_modalidade"], how="left")
+    grade[["pot0", "qtd0"]] = grade[["pot0", "qtd0"]].fillna(0)
+
+    grade = grade.sort_values(["SigUF", "id_modalidade", "mes_idx"])
+    g = grade.groupby(["SigUF", "id_modalidade"])
+    grade["potencia_acumulada_kw"] = grade["pot0"] + g["pot_nova"].cumsum()
+    grade["qtd_acumulada"] = (grade["qtd0"] + g["qtd_nova"].cumsum()).astype("int64")
+    grade["id_tempo"] = grade["mes_idx"].map(dict(enumerate(ids)))
+
+    fato = grade.rename(columns={"SigUF": "cod_uf", "pot_nova": "potencia_nova_kw", "qtd_nova": "qtd_novas_conexoes"})
+    fato["qtd_novas_conexoes"] = fato["qtd_novas_conexoes"].astype("int64")
+    fato["potencia_media_kw"] = np.where(
+        fato["qtd_acumulada"] > 0, fato["potencia_acumulada_kw"] / fato["qtd_acumulada"].replace(0, np.nan), 0.0)
+    for c in ("potencia_acumulada_kw", "potencia_nova_kw", "potencia_media_kw"):
+        fato[c] = fato[c].round(2)
+    # combinações ainda vazias no mês (estoque 0) não agregam informação
+    fato = fato[fato["qtd_acumulada"] > 0]
+    return fato[["id_tempo", "cod_uf", "id_modalidade", "potencia_acumulada_kw", "qtd_acumulada",
+                 "potencia_nova_kw", "qtd_novas_conexoes", "potencia_media_kw"]].reset_index(drop=True)
+
+
+def construir_dims_distribuidora(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    d = df.dropna(subset=["NumCNPJDistribuidora", "SigUF"]).copy()
+    d["cod_distribuidora"] = d["NumCNPJDistribuidora"].astype("int64").astype(str).str.zfill(14)
+    por_uf = d.groupby(["cod_distribuidora", "SigUF"]).size().rename("qtd_usinas").reset_index()
+    por_uf = por_uf.rename(columns={"SigUF": "cod_uf"})
+    nome = d.groupby("cod_distribuidora")["NomAgente"].agg(lambda s: s.mode().iat[0] if not s.mode().empty else s.iloc[0])
+    principal = por_uf.sort_values(["qtd_usinas", "cod_uf"], ascending=[False, True]).drop_duplicates("cod_distribuidora").set_index("cod_distribuidora")["cod_uf"]
+    dim = pd.DataFrame({"nome_distribuidora": nome, "cod_uf_principal": principal}).reset_index()
+    return dim, por_uf
+
+
+def transformar(arquivo: Path | None = None) -> dict:
+    arquivo = arquivo or next(iter(sorted(raw_dir("aneel_gd").glob("*.parquet"))), None)
+    if arquivo is None:
+        raise FileNotFoundError("parquet de GD não encontrado em raw/aneel_gd — rode etl/extract_aneel_gd.py")
+    print(f"[transform_geracao_uf] lendo {arquivo} ...")
+    bruto = pd.read_parquet(arquivo, columns=COLUNAS)
+    total = len(bruto)
+    solar = bruto[bruto["SigTipoGeracao"] == "UFV"].dropna(subset=["SigUF", "CodEmpreendimento"])
+    print(f"[transform_geracao_uf] {total:,} registros; {len(solar):,} usinas fotovoltaicas")
+
+    dim_dist, dist_uf = construir_dims_distribuidora(solar)
+    salvar_trusted(dim_dist, "dim_distribuidora")
+    salvar_trusted(dist_uf, "dim_distribuidora_uf")
+
+    tecnico = carregar_datas_conexao()
+    if tecnico is None:
+        print("[transform_geracao_uf] AVISO: tabela técnica (DatConexao) ausente — usando data de "
+              "atualização cadastral como aproximação. Rode etl/extract_aneel_gd_tecnico.py.", file=sys.stderr)
+    com_data, resumo = definir_mes_de_entrada(solar, tecnico)
+    fato = construir_fato(com_data)
+    salvar_trusted(fato, "fato_geracao_uf")
+
+    ultimo = fato[fato["id_tempo"] == fato["id_tempo"].max()]
+    rel = {
+        "registros_brutos": total, "usinas_ufv": int(len(solar)),
+        "pct_ufv": round(100 * len(solar) / total, 3),
+        "linhas_fato": int(len(fato)), "ufs": int(fato["cod_uf"].nunique()),
+        "ultimo_id_tempo": int(fato["id_tempo"].max()),
+        "potencia_acumulada_final_mw": round(float(ultimo["potencia_acumulada_kw"].sum()) / 1000, 1),
+        "qtd_acumulada_final": int(ultimo["qtd_acumulada"].sum()),
+        **resumo,
+    }
+    salvar_relatorio("geracao", rel)
+    print(f"[transform_geracao_uf] fato_geracao_uf: {len(fato):,} linhas — relatório: {rel}")
+    return rel
 
 
 if __name__ == "__main__":
-    TRUSTED_DIR.mkdir(parents=True, exist_ok=True)
-    transformar()
+    try:
+        transformar()
+    except (FileNotFoundError, RuntimeError) as e:
+        print(f"[transform_geracao_uf] ERRO: {e}", file=sys.stderr)
+        sys.exit(1)

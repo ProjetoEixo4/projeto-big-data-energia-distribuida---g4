@@ -20,3 +20,9 @@ __pycache__/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Artefatos de empacotamento/implantação
+oet_pipeline.zip
+_to_delete/
+.pytest_cache/
+~$*
