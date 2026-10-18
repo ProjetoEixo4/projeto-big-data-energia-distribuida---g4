@@ -1,20 +1,17 @@
 """
 Extração — ANEEL Geração Distribuída (GD)
-Baixa o arquivo Parquet consolidado nacional de empreendimentos de geração
+Baixamos o arquivo Parquet consolidado nacional de empreendimentos de geração
 distribuída, disponível no portal de dados abertos da ANEEL.
 
-Este é o maior arquivo do projeto (fonte da tabela fato principal). O
-download usa streaming com barra de progresso; se o servidor não informar
-o tamanho total, o progresso é mostrado em MB acumulados mesmo assim.
+ (fonte da tabela fato principal)
 
 Uso:
     python etl/extract_aneel_gd.py
     python etl/extract_aneel_gd.py --uf MG
 
-O filtro --uf é opcional e serve apenas para reduzir o arquivo localmente
-durante testes. O filtro temporal (2020-2025) é aplicado na FASE DE
-TRANSFORMAÇÃO, não aqui — a camada raw deve preservar o dado como veio
-da fonte.
+O filtro --uf foi opcional e serviu apenas para reduzir o arquivo localmente
+durante testes. O filtro temporal (2020-2025) será aplicado na FASE DE
+TRANSFORMAÇÃO, camada raw preserva o dado como veio da fonte.
 """
 import argparse
 import sys
