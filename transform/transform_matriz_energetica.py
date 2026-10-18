@@ -1,111 +1,114 @@
 """
-Transformação — EPE BEN (matriz energética nacional) → fato_matriz_energetica
+Transformação — EPE BEN → fato_matriz_energetica (geração ELÉTRICA nacional por fonte)
 
-Cada arquivo ben_AAAA.xlsx tem uma matriz nacional (não por UF) com uma linha
-por etapa do balanço (Produção, Importação, Oferta Total, etc.) e uma coluna
-por fonte de energia, agrupadas em "Fontes de Energia Primária_*" e "Fontes
-de Energia Secundária_*". Os valores estão em mil tep (toneladas equivalentes
-de petróleo).
+Pergunta: qual a participação da energia solar na eletricidade gerada no Brasil, ano a
+ano, frente às demais fontes? Para isso usa-se a matriz "em unidades comerciais" do BEN,
+que traz, em GWh, a produção de cada fonte elétrica e a coluna de eletricidade gerada
+pelas centrais elétricas:
 
-Esta tabela fato é NACIONAL, não tem cod_uf — por isso não se junta a dim_uf
-(consistente com o DDL: fato_matriz_energetica só referencia id_tempo e
-cod_fonte). Usa-se a linha "Produção" (produção nacional de energia primária)
-como base, reduzida às mesmas 8 fontes primárias definidas em
-seed_dimensoes.py — CARVAO soma as colunas Carvão Vapor + Carvão Metalúrgico.
+    Hidráulica / Eólica / Solar fotovoltaica  = linha "Produção" das colunas "<fonte> - GWh"
+                                                 (o BEN contabiliza essas fontes a 100 % na transformação)
+    Total de eletricidade gerada              = Centrais Elétricas de Serviço Público
+                                                 + Centrais Elétricas Autoprodutoras (coluna "Eletricidade - GWh")
+    Térmica e outras                          = total − hidráulica − eólica − solar
+                                                 (gás, carvão, nuclear, biomassa, derivados: o arquivo
+                                                 não os separa em GWh, então ficam como resíduo)
 
-Conversão de unidade: 1 mil tep = 11,63 GWh (fator padrão de conversão
-tep -> MWh: 1 tep = 11,63 MWh; logo 1.000 tep = 11.630 MWh = 11,63 GWh).
+A divisão por tipo de central é preservada: autoprodutoras concentram a geração
+distribuída (consumidores que geram a própria energia), serviço público as usinas
+despachadas/centralizadas. É um indicador NACIONAL e ANUAL (não tem UF): id_tempo =
+AAAA12 (dezembro do ano-base), a mesma convenção da dimensão tempo mensal.
 
 Uso:
     python transform/transform_matriz_energetica.py
-Gera:
-    data/trusted/fato_matriz_energetica.csv
+Gera (Parquet, camada trusted): fato_matriz_energetica
 """
-import glob
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-RAW_DIR = Path("data/raw/epe_ben")
-TRUSTED_DIR = Path("data/trusted")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from oet.io import raw_dir, salvar_relatorio, salvar_trusted  # noqa: E402
 
-MIL_TEP_PARA_GWH = 11.63
+RAW_DIR = raw_dir("epe_ben")
+ARQUIVO_RE = re.compile(r"ben_comerciais_(\d{4})\.xlsx$")
 
-# Mapeia cod_fonte (definido em seed_dimensoes.py) -> lista de colunas do BEN a somar
-MAPA_FONTES = {
-    "PETROLEO": ["Fontes de Energia Primária_Petróleo"],
-    "GAS_NATURAL": ["Fontes de Energia Primária_Gás Natural"],
-    "CARVAO": ["Fontes de Energia Primária_Carvão Vapor", "Fontes de Energia Primária_Carvão Metalúrgico"],
-    "URANIO": ["Fontes de Energia Primária_Urânio U3o8"],
-    "HIDRAULICA": ["Fontes de Energia Primária_Energia Hidráulica"],
-    "LENHA": ["Fontes de Energia Primária_Lenha"],
-    "CANA": ["Fontes de Energia Primária_Produtos da Cana"],
-    "OUTRAS_PRIM": ["Fontes de Energia Primária_Outras Fontes Primárias"],
+CENTRAL_PUBLICA = "Centrais Elétricas de Serviço Público"
+CENTRAL_AUTOPROD = "Centrais Elétricas Autoprodutoras"
+COL_ELETRICIDADE = "Eletricidade - GWh"
+FONTES_DIRETAS = {  # cod_fonte -> coluna da matriz
+    "HIDRAULICA": "Hidráulica - GWh",
+    "EOLICA": "Eólica - GWh",
+    "SOLAR_FV": "Solar Fotovoltaica - GWh",
 }
-
-ANO_RE = re.compile(r"ben_(\d{4})\.xlsx$")
-
-
-def extrair_ano(caminho: str) -> int | None:
-    m = ANO_RE.search(caminho)
-    return int(m.group(1)) if m else None
 
 
 def processar_arquivo(caminho: Path, ano: int) -> list[dict]:
-    df = pd.read_excel(caminho, sheet_name=0)
-    linha_producao = df[df["grupo"] == "Produção"]
-    if linha_producao.empty:
-        print(f"[transform_matriz_energetica] aviso: linha 'Produção' não encontrada em {caminho}", file=sys.stderr)
-        return []
-    linha = linha_producao.iloc[0]
+    d = pd.read_excel(caminho, sheet_name=0).set_index("grupo")
+    faltam = [c for c in [COL_ELETRICIDADE, *FONTES_DIRETAS.values()] if c not in d.columns]
+    if faltam:
+        raise RuntimeError(f"{caminho.name}: colunas ausentes {faltam}")
 
-    valores = {}
-    for cod_fonte, colunas in MAPA_FONTES.items():
-        valores[cod_fonte] = sum(max(float(linha[c]), 0) for c in colunas if c in df.columns)
+    pub = float(d.loc[CENTRAL_PUBLICA, COL_ELETRICIDADE])
+    aut = float(d.loc[CENTRAL_AUTOPROD, COL_ELETRICIDADE])
+    total, total_pub, total_aut = pub + aut, pub, aut
 
-    total = sum(valores.values())
-    if total == 0:
-        return []
+    linhas, soma_pub, soma_aut = [], 0.0, 0.0
+    for cod, coluna in FONTES_DIRETAS.items():
+        # nas linhas das centrais o BEN registra o INSUMO consumido (negativo); como a
+        # transformação é 1:1 para estas fontes, o módulo é a eletricidade entregue
+        g_pub = -float(d.loc[CENTRAL_PUBLICA, coluna])
+        g_aut = -float(d.loc[CENTRAL_AUTOPROD, coluna])
+        prod = float(d.loc["Produção", coluna])
+        linhas.append((cod, prod, g_pub, g_aut))
+        soma_pub += g_pub
+        soma_aut += g_aut
+    ger_dir = sum(x[1] for x in linhas)
+    linhas.append(("TERMICA_OUTRAS", total - ger_dir, total_pub - soma_pub, total_aut - soma_aut))
 
-    id_tempo = ano * 100 + 12  # matriz é anual; convenciona-se dezembro como id_tempo de referência
-    linhas = []
-    for cod_fonte, valor_mil_tep in valores.items():
-        linhas.append({
-            "id_tempo": id_tempo,
-            "cod_fonte": cod_fonte,
-            "participacao_percentual": round(100 * valor_mil_tep / total, 2),
-            "geracao_gwh": round(valor_mil_tep * MIL_TEP_PARA_GWH, 2),
-        })
-    return linhas
+    return [{
+        "id_tempo": ano * 100 + 12, "cod_fonte": cod,
+        "participacao_percentual": round(100 * g / total, 2),
+        "geracao_gwh": round(g, 1),
+        "geracao_servico_publico_gwh": round(gp, 1),
+        "geracao_autoprodutoras_gwh": round(ga, 1),
+    } for cod, g, gp, ga in linhas]
 
 
-def transformar() -> None:
-    arquivos = sorted(glob.glob(str(RAW_DIR / "ben_*.xlsx")))
+def transformar() -> pd.DataFrame:
+    arquivos = sorted(p for p in RAW_DIR.glob("ben_comerciais_*.xlsx"))
     if not arquivos:
-        print(f"[transform_matriz_energetica] ERRO: nenhum arquivo ben_*.xlsx encontrado em {RAW_DIR}. "
-              "Rode etl/extract_epe_ben.py primeiro.", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"nenhum ben_comerciais_AAAA.xlsx em {RAW_DIR} — rode etl/extract_epe_ben.py --pasta ...")
+    linhas = []
+    for arq in arquivos:
+        ano = int(ARQUIVO_RE.search(arq.name).group(1))
+        print(f"[transform_matriz_energetica] {arq.name} (ano {ano})")
+        linhas.extend(processar_arquivo(arq, ano))
+    fato = pd.DataFrame(linhas).sort_values(["id_tempo", "cod_fonte"]).reset_index(drop=True)
 
-    todas_linhas = []
-    for caminho in arquivos:
-        ano = extrair_ano(caminho)
-        if ano is None:
-            continue
-        print(f"[transform_matriz_energetica] processando {caminho} (ano {ano}) ...")
-        todas_linhas.extend(processar_arquivo(Path(caminho), ano))
+    # coerência: as fontes de cada ano somam 100 %
+    soma = fato.groupby("id_tempo")["participacao_percentual"].sum()
+    if not ((soma - 100).abs() < 0.1).all():
+        raise RuntimeError(f"participações não somam 100 %: {soma.to_dict()}")
+    if (fato["geracao_gwh"] < 0).any():
+        raise RuntimeError("geração negativa após a decomposição — verifique o arquivo do BEN")
 
-    if not todas_linhas:
-        print("[transform_matriz_energetica] ERRO: nenhuma linha gerada.", file=sys.stderr)
-        sys.exit(1)
-
-    fato = pd.DataFrame(todas_linhas)
-    fato.to_csv(TRUSTED_DIR / "fato_matriz_energetica.csv", index=False)
-    print(f"[transform_matriz_energetica] fato_matriz_energetica: {len(fato)} linhas salvas")
-    print("[transform_matriz_energetica] concluído.")
+    salvar_trusted(fato, "fato_matriz_energetica")
+    solar = fato[fato["cod_fonte"] == "SOLAR_FV"].set_index("id_tempo")["participacao_percentual"]
+    salvar_relatorio("matriz", {"linhas": int(len(fato)), "anos": sorted({int(t // 100) for t in fato["id_tempo"]}),
+                                "participacao_solar_pct": {str(k // 100): float(v) for k, v in solar.items()}})
+    print(f"[transform_matriz_energetica] fato_matriz_energetica: {len(fato)} linhas; "
+          f"solar % = {solar.to_dict()}")
+    return fato
 
 
 if __name__ == "__main__":
-    TRUSTED_DIR.mkdir(parents=True, exist_ok=True)
-    transformar()
+    try:
+        transformar()
+    except (FileNotFoundError, RuntimeError) as e:
+        print(f"[transform_matriz_energetica] ERRO: {e}", file=sys.stderr)
+        sys.exit(1)

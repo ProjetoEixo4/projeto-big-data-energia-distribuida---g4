@@ -11,17 +11,23 @@ capita é CALCULADO a partir do PIB total extraído da API SIDRA (tabela 5938,
 variável 37, nível UF) dividido pela população de referência, usando o ano
 mais recente disponível no arquivo baixado por extract_ibge_contas_regionais.py.
 
-dim_fonte_energia: as fontes primárias de energia do BEN (Balanço Energético
-Nacional), reduzidas às 8 categorias principais usadas em fato_matriz_energetica
-(ver transform_matriz_energetica.py para o detalhamento de por que essas 8).
+dim_fonte_energia: as 4 fontes da geração elétrica nacional usadas em
+fato_matriz_energetica (hidráulica, eólica, solar fotovoltaica e térmica/outras; a
+categoria 'Mista' reconhece que térmica/outras mistura biomassa e fósseis).
+
+dim_modalidade: catálogo FIXO (5 modalidades de GD x 10 classes de consumo = 50
+linhas) com id estável. Antes, a dimensão era "descoberta" nos dados e o id era
+um SERIAL do banco — qualquer carga nova podia renumerar e quebrar o fato.
+Agora o id é determinístico (posição no catálogo) e valores desconhecidos caem
+em "Não informado"/"Outras" em vez de criar linhas novas sem controle.
 
 Uso:
     python transform/seed_dimensoes.py
-Gera:
-    data/trusted/dim_tempo.csv
-    data/trusted/dim_uf.csv
-    data/trusted/dim_fonte_energia.csv
+Gera (Parquet, camada trusted):
+    dim_tempo, dim_uf, dim_fonte_energia, dim_modalidade
 """
+from __future__ import annotations
+
 import glob
 import json
 import sys
@@ -29,8 +35,10 @@ from pathlib import Path
 
 import pandas as pd
 
-RAW_IBGE_DIR = Path("data/raw/ibge_contas_regionais")
-TRUSTED_DIR = Path("data/trusted")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from oet.io import raw_dir, salvar_trusted  # noqa: E402
+
+RAW_IBGE_DIR = raw_dir("ibge_contas_regionais")
 
 ANO_INICIO = 2020
 ANO_FIM = 2025
@@ -69,17 +77,47 @@ UF_REFERENCIA = [
     ("53", "DF", "Distrito Federal", "Centro-Oeste", 2817381, 5760.783),
 ]
 
-# Fontes primárias do BEN reduzidas a 8 categorias (ver transform_matriz_energetica.py)
+# Fontes da geração elétrica nacional (BEN, matriz em unidades comerciais — ver transform_matriz_energetica.py)
 FONTES_ENERGIA = [
-    ("PETROLEO", "Petróleo", "Não renovável"),
-    ("GAS_NATURAL", "Gás Natural", "Não renovável"),
-    ("CARVAO", "Carvão Mineral", "Não renovável"),
-    ("URANIO", "Urânio (Nuclear)", "Não renovável"),
-    ("HIDRAULICA", "Energia Hidráulica", "Renovável"),
-    ("LENHA", "Lenha", "Renovável"),
-    ("CANA", "Produtos da Cana", "Renovável"),
-    ("OUTRAS_PRIM", "Outras Primárias (solar/eólica)", "Renovável"),
+    ("HIDRAULICA", "Hidráulica", "Renovável"),
+    ("EOLICA", "Eólica", "Renovável"),
+    ("SOLAR_FV", "Solar fotovoltaica", "Renovável"),
+    ("TERMICA_OUTRAS", "Térmica e outras (gás, carvão, nuclear, biomassa, derivados)", "Mista"),
 ]
+
+
+MODALIDADES = [
+    "Geração na própria UC", "Autoconsumo remoto", "Compartilhada", "Condomínio", "Não informado",
+]
+CLASSES = [
+    "Residencial", "Residencial baixa renda", "Comercial", "Industrial", "Rural",
+    "Poder Público", "Serviço Público", "Iluminação pública", "Consumo próprio", "Outras",
+]
+
+
+def tipo_consumidor(modalidade: str, classe: str) -> str:
+    """Regra única usada na dimensão (e testada contra os dados reais)."""
+    if classe == "Rural":
+        return "Rural"
+    if modalidade == "Condomínio":
+        return "Multifamiliar"
+    if classe in ("Residencial", "Residencial baixa renda"):
+        return "Unifamiliar"
+    if classe == "Comercial":
+        return "Comercial"
+    if classe == "Industrial":
+        return "Industrial"
+    return "Outro"
+
+
+def gerar_dim_modalidade() -> pd.DataFrame:
+    linhas, i = [], 1
+    for m in MODALIDADES:
+        for c in CLASSES:
+            linhas.append({"id_modalidade": i, "modalidade_aneel": m, "classe_consumo": c,
+                           "tipo_consumidor": tipo_consumidor(m, c)})
+            i += 1
+    return pd.DataFrame(linhas)
 
 
 def gerar_dim_tempo() -> pd.DataFrame:
@@ -93,12 +131,12 @@ def gerar_dim_tempo() -> pd.DataFrame:
 
 
 def carregar_pib_mais_recente() -> dict:
-    """Lê o JSON mais recente de PIB por UF e retorna {cod_ibge: pib_total_mil_reais} do último ano disponível."""
+    """Lê o JSON mais recente de PIB por UF; devolve ({cod_ibge: pib_total_mil_reais}, ano_ref)."""
     arquivos = sorted(glob.glob(str(RAW_IBGE_DIR / "ibge_pib_uf_*.json")))
     if not arquivos:
         print("[seed_dimensoes] aviso: nenhum arquivo de PIB do IBGE encontrado — "
               "pib_per_capita ficará nulo. Rode extract_ibge_contas_regionais.py primeiro.", file=sys.stderr)
-        return {}
+        return {}, None
 
     with open(arquivos[-1], encoding="utf-8") as f:
         dados = json.load(f)[1:]  # [0] é o cabeçalho da SIDRA
@@ -107,11 +145,11 @@ def carregar_pib_mais_recente() -> dict:
     ultimo_ano = df["D3C"].astype(int).max()
     df_ultimo = df[df["D3C"].astype(int) == ultimo_ano]
     print(f"[seed_dimensoes] usando PIB do ano {ultimo_ano} (mais recente disponível na base)")
-    return dict(zip(df_ultimo["D1C"], df_ultimo["V"].astype(float)))
+    return dict(zip(df_ultimo["D1C"], df_ultimo["V"].astype(float))), int(ultimo_ano)
 
 
 def gerar_dim_uf() -> pd.DataFrame:
-    pib_por_ibge = carregar_pib_mais_recente()
+    pib_por_ibge, ano_ref_pib = carregar_pib_mais_recente()
 
     linhas = []
     for cod_ibge, cod_uf, nome_uf, regiao, populacao, area_km2 in UF_REFERENCIA:
@@ -119,7 +157,7 @@ def gerar_dim_uf() -> pd.DataFrame:
         if pib_total_mil_reais is not None and populacao:
             # V vem em "Mil Reais" (MN da SIDRA) -> multiplica por 1000 para reais, depois divide pela população
             pib_per_capita = round((pib_total_mil_reais * 1000) / populacao, 2)
-            pib_projetado = False
+            pib_projetado = False  # valor observado (do ano_ref_pib), não projetado
         else:
             pib_per_capita = None
             pib_projetado = True
@@ -129,6 +167,7 @@ def gerar_dim_uf() -> pd.DataFrame:
             "regiao": regiao,
             "pib_per_capita": pib_per_capita,
             "pib_projetado": pib_projetado,
+            "ano_ref_pib": ano_ref_pib if pib_per_capita is not None else None,
             "populacao": populacao,
             "area_km2": area_km2,
         })
@@ -139,19 +178,17 @@ def gerar_dim_fonte_energia() -> pd.DataFrame:
     return pd.DataFrame(FONTES_ENERGIA, columns=["cod_fonte", "nome_fonte", "categoria"])
 
 
-if __name__ == "__main__":
-    TRUSTED_DIR.mkdir(parents=True, exist_ok=True)
-
-    dim_tempo = gerar_dim_tempo()
-    dim_tempo.to_csv(TRUSTED_DIR / "dim_tempo.csv", index=False)
-    print(f"[seed_dimensoes] dim_tempo: {len(dim_tempo)} linhas salvas")
-
-    dim_uf = gerar_dim_uf()
-    dim_uf.to_csv(TRUSTED_DIR / "dim_uf.csv", index=False)
-    print(f"[seed_dimensoes] dim_uf: {len(dim_uf)} linhas salvas")
-
-    dim_fonte = gerar_dim_fonte_energia()
-    dim_fonte.to_csv(TRUSTED_DIR / "dim_fonte_energia.csv", index=False)
-    print(f"[seed_dimensoes] dim_fonte_energia: {len(dim_fonte)} linhas salvas")
-
+def main() -> None:
+    for nome, df in [
+        ("dim_tempo", gerar_dim_tempo()),
+        ("dim_uf", gerar_dim_uf()),
+        ("dim_fonte_energia", gerar_dim_fonte_energia()),
+        ("dim_modalidade", gerar_dim_modalidade()),
+    ]:
+        salvar_trusted(df, nome)
+        print(f"[seed_dimensoes] {nome}: {len(df)} linhas salvas")
     print("[seed_dimensoes] concluído.")
+
+
+if __name__ == "__main__":
+    main()

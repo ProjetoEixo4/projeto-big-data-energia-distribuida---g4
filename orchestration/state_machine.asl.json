@@ -1,0 +1,584 @@
+{
+  "Comment": "Pipeline OET — Observatório de Energia e Transição Digital (Etapa 3)",
+  "StartAt": "VerificarSimulacao",
+  "TimeoutSeconds": 14400,
+  "States": {
+    "VerificarSimulacao": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.simular_falha",
+              "IsPresent": true
+            },
+            {
+              "Variable": "$.simular_falha",
+              "BooleanEquals": true
+            }
+          ],
+          "Next": "FalhaSimulada"
+        }
+      ],
+      "Default": "Extracao"
+    },
+    "FalhaSimulada": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "${JobPython}",
+        "Arguments": {
+          "--RAW_BUCKET": "${RawBucket}",
+          "--TRUSTED_BUCKET": "${TrustedBucket}",
+          "--EXECUCAO_REF.$": "$$.Execution.Name",
+          "--STEP": "falha_simulada"
+        }
+      },
+      "ResultSelector": {
+        "job.$": "$.JobName",
+        "run.$": "$.Id",
+        "estado.$": "$.JobRunState",
+        "segundos.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.resultado",
+      "TimeoutSeconds": 3600,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.erro",
+          "Next": "NotificarFalha"
+        }
+      ],
+      "Next": "NotificarSucesso"
+    },
+    "Extracao": {
+      "Type": "Parallel",
+      "ResultPath": "$.extracao",
+      "Next": "Dimensoes",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.erro",
+          "Next": "NotificarFalha"
+        }
+      ],
+      "Branches": [
+        {
+          "StartAt": "ExtrairGD",
+          "States": {
+            "ExtrairGD": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "extract_aneel_gd"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairGDTecnico",
+          "States": {
+            "ExtrairGDTecnico": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "extract_aneel_gd_tecnico"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairTarifas",
+          "States": {
+            "ExtrairTarifas": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "extract_aneel_tarifas"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairINMET",
+          "States": {
+            "ExtrairINMET": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "extract_inmet"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairIBGE",
+          "States": {
+            "ExtrairIBGE": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "extract_ibge_contas_regionais"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ExtrairIPCA",
+          "States": {
+            "ExtrairIPCA": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "extract_ipca"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      ]
+    },
+    "Dimensoes": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "${JobPython}",
+        "Arguments": {
+          "--RAW_BUCKET": "${RawBucket}",
+          "--TRUSTED_BUCKET": "${TrustedBucket}",
+          "--EXECUCAO_REF.$": "$$.Execution.Name",
+          "--STEP": "seed_dimensoes"
+        }
+      },
+      "ResultSelector": {
+        "job.$": "$.JobName",
+        "run.$": "$.Id",
+        "estado.$": "$.JobRunState",
+        "segundos.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.resultado",
+      "TimeoutSeconds": 3600,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.erro",
+          "Next": "NotificarFalha"
+        }
+      ],
+      "Next": "Transformacao"
+    },
+    "Transformacao": {
+      "Type": "Parallel",
+      "ResultPath": "$.transformacao",
+      "Next": "Tarifa",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.erro",
+          "Next": "NotificarFalha"
+        }
+      ],
+      "Branches": [
+        {
+          "StartAt": "TransformarGDSpark",
+          "States": {
+            "TransformarGDSpark": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobSpark}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "TransformarClima",
+          "States": {
+            "TransformarClima": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "transform_clima"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "TransformarMatriz",
+          "States": {
+            "TransformarMatriz": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "${JobPython}",
+                "Arguments": {
+                  "--RAW_BUCKET": "${RawBucket}",
+                  "--TRUSTED_BUCKET": "${TrustedBucket}",
+                  "--EXECUCAO_REF.$": "$$.Execution.Name",
+                  "--STEP": "transform_matriz"
+                }
+              },
+              "ResultSelector": {
+                "job.$": "$.JobName",
+                "run.$": "$.Id",
+                "estado.$": "$.JobRunState",
+                "segundos.$": "$.ExecutionTime"
+              },
+              "ResultPath": "$.resultado",
+              "TimeoutSeconds": 3600,
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.TaskFailed"
+                  ],
+                  "IntervalSeconds": 60,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      ]
+    },
+    "Tarifa": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "${JobPython}",
+        "Arguments": {
+          "--RAW_BUCKET": "${RawBucket}",
+          "--TRUSTED_BUCKET": "${TrustedBucket}",
+          "--EXECUCAO_REF.$": "$$.Execution.Name",
+          "--STEP": "transform_tarifa"
+        }
+      },
+      "ResultSelector": {
+        "job.$": "$.JobName",
+        "run.$": "$.Id",
+        "estado.$": "$.JobRunState",
+        "segundos.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.resultado",
+      "TimeoutSeconds": 3600,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.erro",
+          "Next": "NotificarFalha"
+        }
+      ],
+      "Next": "Carga"
+    },
+    "Carga": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "${JobLoad}",
+        "Arguments": {
+          "--RAW_BUCKET": "${RawBucket}",
+          "--TRUSTED_BUCKET": "${TrustedBucket}",
+          "--EXECUCAO_REF.$": "$$.Execution.Name",
+          "--STEP": "load_postgres"
+        }
+      },
+      "ResultSelector": {
+        "job.$": "$.JobName",
+        "run.$": "$.Id",
+        "estado.$": "$.JobRunState",
+        "segundos.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.resultado",
+      "TimeoutSeconds": 3600,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.erro",
+          "Next": "NotificarFalha"
+        }
+      ],
+      "Next": "NotificarSucesso"
+    },
+    "NotificarSucesso": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${TopicArn}",
+        "Subject": "OET pipeline: execução concluída",
+        "Message.$": "States.Format('Execução {} concluída com sucesso. Detalhes: https://${Region}.console.aws.amazon.com/states/home?region=${Region}#/v2/executions/details/{}', $$.Execution.Name, $$.Execution.Id)"
+      },
+      "ResultPath": null,
+      "Next": "Sucesso"
+    },
+    "Sucesso": {
+      "Type": "Succeed"
+    },
+    "NotificarFalha": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${TopicArn}",
+        "Subject": "OET pipeline: FALHA na execução",
+        "Message.$": "States.Format('Execução {} FALHOU. Erro: {} | Causa: {} | Detalhes: https://${Region}.console.aws.amazon.com/states/home?region=${Region}#/v2/executions/details/{}', $$.Execution.Name, $.erro.Error, $.erro.Cause, $$.Execution.Id)"
+      },
+      "ResultPath": null,
+      "Next": "Falha"
+    },
+    "Falha": {
+      "Type": "Fail",
+      "Error": "PipelineOETFalhou",
+      "Cause": "Veja a notificação SNS e o histórico da execução."
+    }
+  }
+}

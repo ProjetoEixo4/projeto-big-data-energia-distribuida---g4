@@ -1,123 +1,104 @@
-# Geração de Energia Distribuída no Brasil — Pipeline de Integração de Dados
+# Observatório de Energia e Transição Digital (OET) — Grupo 3, Eixo 4
 
-Projeto de Big Data Analytics (PUC Minas, Eixo 4) — Etapa 2: Replicação e Integração de Dados.
+Pipeline de Big Data Analytics sobre a **expansão da geração distribuída solar no Brasil (2020–2025)**,
+em granularidade UF × mês, cruzando regulação (ANEEL), clima (INMET), preços (ANEEL + IPCA), socioeconomia
+(IBGE) e a matriz elétrica nacional (EPE/BEN).
 
-Observatório de Energia e Transição Digital (OET) — estudo comparativo independente sobre
-fontes de energia, custos e economia da geração distribuída para consumidores unifamiliares,
-multifamiliares e rurais no Brasil.
+Curso de Tecnologia em Banco de Dados — PUC Minas. Integrantes: Fernanda Coimbra, Giovanna Bruniera de Oliveira,
+Guilherme Henrique Vicente Oliveira, Lucas Lima de Paula, Mariana Reis Mendes, Vivian Rebelo Assunção.
 
-## Visão geral da arquitetura
-
-```
-Fontes públicas (ANEEL, EPE, INMET, IBGE)
-        │  extração (boto3 / requests / API SIDRA)
-        ▼
-   S3 — camada raw           (dados originais, particionados por fonte/data)
-        │  AWS Glue (PySpark / Python Shell)
-        ▼
-   S3 — camada trusted       (Parquet particionado por ano/UF)
-        │  carga (COPY / psycopg2, idempotente via staging + upsert)
-        ▼
-   Amazon RDS (PostgreSQL)   (modelo em constelação de fatos)
-        │
-        ▼
-   Athena (consultas ad hoc sobre a camada trusted) + QuickSight (dashboards)
-```
-
-Orquestração: Amazon EventBridge (agendamento) + AWS Step Functions (sequenciamento dos jobs).
-Monitoramento: Amazon CloudWatch (logs e alarmes de falha).
-
-Ver `docs/architecture.png` para o diagrama completo e `sql/` para o modelo dimensional.
-
-## Recorte temporal do projeto
-
-Em conversa com o orientador, o grupo definiu delimitar o projeto ao período de
-**2020 a 2025**, usando cinco fontes: ANEEL (Geração Distribuída e Tarifas), EPE
-(BEN), INMET (BDMEP) e IBGE (PIB dos Municípios/SIDRA). O filtro temporal é
-aplicado tanto na extração (quando a fonte permite, como INMET e IBGE) quanto na
-transformação (como camada de segurança para todas as fontes — ver
-`etl/transform_common.py`).
-
-**Duas ressalvas de cobertura conhecidas, não são erros de pipeline:**
-
-- **IBGE — PIB dos Municípios**: defasagem de divulgação de ~2 anos. A edição
-  mais recente (dez/2025) cobre até 2023 — 2024 e 2025 ficarão sem esse
-  indicador até novas divulgações do IBGE.
-- **EPE — BEN**: publicado com defasagem de 1 ano em relação ao ano-base. A
-  edição com dados completos de 2025 só estará disponível em 2026.
-
-## Nota sobre ABSOLAR e Greener
-
-Essas duas fontes foram avaliadas na Etapa 1 como possíveis fontes complementares de
-custo de instalação (preço por watt-pico), mas **excluídas do pipeline automatizado**:
-
-- **ABSOLAR** exige cadastro prévio para acesso à base — solicitado pelo grupo, sem resposta.
-- **Greener** não publica seus estudos em formato aberto e estruturado.
-
-A dimensão de custo é tratada, em vez disso, por (i) um indicador indireto calculado a
-partir da própria ANEEL (taxa de crescimento da potência instalada, como proxy de
-maturidade de mercado) e (ii) citação pontual de literatura secundária que já reproduz
-números da ABSOLAR (ex.: imprensa especializada, publicações do BNDES), sem necessidade
-de acesso direto à fonte primária. A tabela `oet.apoio_custo_instalacao` (ver
-`sql/02_facts.sql`) é mantida no modelo apenas como registro de referência desses valores
-citados — não há script de extração associado a ela.
-
-## Estrutura do repositório
+## Arquitetura (Etapa 3)
 
 ```
-sql/            DDL do banco (dimensões e fatos) — PostgreSQL
-etl/            Scripts Python de extração, transformação e carga
-glue/           Job PySpark para o AWS Glue (fonte de maior volume: ANEEL)
-infra/          Comandos AWS CLI e política IAM mínima
-orchestration/  Definição do Step Functions (State Machine)
-docs/           Diagrama de arquitetura
+EventBridge (agenda mensal) ─▶ Step Functions ─────────────────────────────────────────────┐
+                                  │                                                         │ falha (após Retry)
+   ┌── Extração (6 em paralelo) ──┤                                                         ▼
+   │   ANEEL GD · ANEEL GD técnico · ANEEL tarifas · INMET · IBGE PIB · IBGE IPCA          SNS ─▶ e-mail
+   ▼                                                                                         ▲
+ S3 RAW ─▶ Dimensões ─▶ Transformação (3 em paralelo) ─▶ Tarifa ─▶ Carga ─▶ SNS (sucesso) ───┘
+ (como veio)            GD em PySpark · Clima · Matriz        │       │
+                                                              ▼       ▼
+                                                      S3 TRUSTED   RDS PostgreSQL
+                                                      (Parquet)    (staging + upsert, atômico)
 ```
 
-## Como rodar localmente (antes de subir para a AWS)
+* **Glue Python Shell** (`glue/run_step.py` + `glue/runner.py`): um runner único executa os mesmos scripts
+  `etl/` e `transform/` que rodam no computador — o que se testa localmente é o que vai para a nuvem.
+* **Glue Spark** (`glue/glue_job_gd_pyspark.py`): geração distribuída (4,6 milhões de usinas) em PySpark; equivalência
+  com a versão pandas comprovada por `tests/test_equivalencia_spark.py`.
+* **Step Functions** (`orchestration/`): paralelismo, `Retry` com backoff, `Catch` → SNS, simulação de falha.
+* **Carga idempotente** (`etl/load_postgres.py`): valida → staging (COPY) → upsert só do que mudou → auditoria em
+  `etl_execucao`; tudo numa transação. Reexecutar não duplica nem altera nada.
+* **Infraestrutura como código** (`infra/oet-pipeline.yaml`): buckets, IAM de menor privilégio, Secrets Manager,
+  rede privada com NAT para o job de carga, Glue, Step Functions, EventBridge, SNS.
+
+## Modelo dimensional (constelação de fatos, UF × mês)
+
+| Tabela | Grão | Observação |
+|---|---|---|
+| `fato_geracao_uf` | mês × UF × modalidade | **estoque acumulado** de potência/usinas solares + fluxo de novas conexões |
+| `fato_tarifa` | mês × UF | R$/kWh nominal e em **reais de dez/2025** (IPCA) |
+| `fato_matriz_energetica` | ano (nacional) × fonte | geração elétrica em GWh: hidráulica, eólica, **solar**, térmica/outras |
+| `dim_clima_uf` | mês × UF | irradiação **kWh/m²/dia**, temperatura, chuva, cobertura da amostra |
+| `dim_tempo`, `dim_uf`, `dim_distribuidora`, `dim_modalidade`, `dim_fonte_energia` | — | `dim_modalidade` tem catálogo fixo de 50 linhas com id estável |
+
+## Decisões de dados (o que foi corrigido da Etapa 2)
+
+* **Tarifa**: o arquivo da ANEEL tem ~328 mil linhas para ~2 mil tarifas relevantes. O recorte é B1 residencial,
+  convencional, *Tarifa de Aplicação*; cada reajuste vale até o próximo; média mensal ponderada por dias; UF =
+  média das distribuidoras ponderada pelas usinas solares conectadas. `tarifa_deflacionada` é de fato deflacionada.
+* **Geração**: só solar (UFV, 99,98 % do cadastro); série mensal **acumulada** a partir da data de conexão
+  (`DatConexao`, tabela técnica da ANEEL). Sem esse arquivo o pipeline cai para a data de atualização cadastral e
+  marca `serie_aproximada = true` no relatório de qualidade.
+* **Clima**: a expressão regular antiga descartava as regiões de 1 letra (N, S) e a pasta `2025/` — saíam 1.020 linhas
+  em vez de 1.944 (27 UFs × 72 meses). Radiação passou de kJ/m² médio para **kWh/m²/dia**, com validade diurna e
+  `cobertura_pct`.
+* **Matriz**: o extrato antigo media energia primária e não isolava a solar; agora usa a matriz em unidades comerciais.
+* **PIB**: IBGE publica com ~2 anos de defasagem; `dim_uf.ano_ref_pib` registra o ano usado (2023).
+
+## Executar localmente
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env                                      # preencha as credenciais do RDS
 
-# 1. Extração (grava em ./data/raw/<fonte>/) — 5 fontes automatizadas
 python etl/extract_aneel_gd.py
+python etl/extract_aneel_gd_tecnico.py
 python etl/extract_aneel_tarifas.py
-python etl/extract_epe_ben.py
-python etl/extract_ibge_sidra.py
-python etl/extract_inmet.py
-# ABSOLAR e Greener não têm script de extração — ver seção "Nota sobre ABSOLAR e Greener" acima
+python etl/extract_inmet.py --ano-inicio 2020 --ano-fim 2025
+python etl/extract_ibge_contas_regionais.py
+python etl/extract_ipca.py
+python etl/extract_epe_ben.py --pasta "<pasta com matriz_balanco_energitico_unidades_comerciais_AAAA.xlsx>"
 
-# 2. Transformação (grava em ./data/trusted/ como Parquet particionado)
-python etl/transform_common.py
-
-# 3. Carga no PostgreSQL (local ou RDS, via variável de ambiente DATABASE_URL)
-export DATABASE_URL="postgresql://usuario:senha@localhost:5432/oet"
-psql "$DATABASE_URL" -f sql/01_dimensions.sql
-psql "$DATABASE_URL" -f sql/02_facts.sql
-python etl/load_postgres.py
+python transform/seed_dimensoes.py
+python transform/transform_geracao_uf.py
+python transform/transform_clima_uf.py
+python transform/transform_tarifa.py          # depende da geração (pesos por distribuidora) e do IPCA
+python transform/transform_matriz_energetica.py
+python etl/load_postgres.py --ddl             # cria/migra o esquema e carrega
 ```
 
-## Como migrar para a AWS
+Relatórios de qualidade de cada transformação ficam em `data/trusted/_qualidade_*.json`.
 
-1. Criar os buckets S3 (`infra/create_s3_buckets.sh`).
-2. Criar um RDS PostgreSQL (Free Tier: `db.t3.micro`, 20 GB).
-3. Publicar `glue/glue_job_aneel_gd.py` como um Glue Job (Python Shell ou Spark, conforme
-   volume real observado na extração).
-4. Publicar a State Machine de `orchestration/step_functions_definition.json`.
-5. Agendar via EventBridge (ex.: diariamente às 03h).
+## Na AWS
 
-## Custos estimados (uso acadêmico, dentro do Free Tier na maior parte)
+Passo a passo completo em [`docs/GUIA_IMPLANTACAO_ETAPA3.md`](docs/GUIA_IMPLANTACAO_ETAPA3.md).
+Resumo: `python infra/deploy_aws.py implantar --email ...` → `artefatos` → `executar`.
 
-| Serviço | Estimativa mensal |
-|---|---|
-| S3 (< 5 GB) | Gratuito (Free Tier) |
-| RDS PostgreSQL `db.t3.micro` | Gratuito por 12 meses (Free Tier) |
-| AWS Glue | ~US$ 0,44/hora de DPU processada (uso pontual, poucas horas/mês) |
-| Athena | ~US$ 5 por TB escaneado (volumes do projeto: centavos/mês) |
-| Step Functions + EventBridge | Gratuito na faixa de uso do projeto |
-| QuickSight | 1 usuário grátis por 30 dias (Standard); após isso, ~US$ 9/usuário/mês |
+## Testes
 
-## Links
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/test_unitarios.py -q           # lógica de negócio, segundos, sem rede
+python tests/test_equivalencia_spark.py               # pandas == Spark (dados sintéticos e reais)
+python tests/test_pipeline_e2e_moto.py                # pipeline inteiro em S3 simulado + PostgreSQL de teste
+cfn-lint infra/oet-pipeline.yaml
+```
 
-- Repositório: `[PREENCHER — link do GitHub do grupo após o push]`
-- Documento completo da Etapa 2 (PDF/DOCX): ver entrega no AVA.
+## Limitações conhecidas
+
+* Sem `DatConexao` a série de geração é aproximada (o relatório de qualidade avisa).
+* Térmica/outras é resíduo (o arquivo da EPE não separa gás, carvão, nuclear e biomassa em GWh).
+* PIB disponível só até 2023; tarifa por UF usa as usinas solares como proxy de peso de consumidores.
+* O job de carga usa NAT Gateway (~US$ 1,5/dia): remova a stack após as entregas (`deploy_aws.py destruir`).

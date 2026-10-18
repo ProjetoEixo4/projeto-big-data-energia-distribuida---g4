@@ -1,0 +1,442 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  OET - Observatorio de Energia e Transicao Digital | Etapa 3: orquestracao.
+  Glue (Python Shell + Spark), Step Functions, EventBridge, SNS, Secrets Manager e rede
+  privada (NAT) para o job que grava no RDS PostgreSQL. Deploy: infra/deploy_aws.py
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: projeto-eixo4-g3
+    Description: Prefixo dos recursos criados (buckets trusted/artifacts, jobs, etc.).
+  RawBucketName:
+    Type: String
+    Default: projeto-eixo4-g3-raw
+    Description: Bucket RAW que JA EXISTE (criado na Etapa 2).
+  NotificationEmail:
+    Type: String
+    Description: E-mail que recebe os avisos de sucesso/falha (precisa confirmar a inscricao SNS).
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC onde esta o RDS (normalmente a VPC padrao).
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet PUBLICA da mesma VPC, usada para hospedar o NAT Gateway.
+  PrivateSubnetCidr:
+    Type: String
+    Default: 172.31.250.0/24
+    Description: Faixa LIVRE dentro da VPC para a nova subnet privada do job de carga.
+  PrivateSubnetAz:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: sa-east-1a
+    Description: Zona de disponibilidade da subnet privada (use a mesma da subnet publica).
+  RdsSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group anexado ao RDS (receberao uma regra de entrada 5432 vinda do Glue).
+  DbHost:
+    Type: String
+    Description: Endpoint do RDS (ex. database-1.xxxx.sa-east-1.rds.amazonaws.com).
+  DbPort:
+    Type: String
+    Default: "5432"
+  DbName:
+    Type: String
+    Default: postgres
+  DbUser:
+    Type: String
+  DbPassword:
+    Type: String
+    NoEcho: true
+    AllowedPattern: '^[^"\\\s]+$'
+    ConstraintDescription: Sem aspas, barra invertida ou espacos.
+  ScheduleExpression:
+    Type: String
+    Default: cron(0 9 1 * ? *)
+    Description: Agenda do EventBridge (UTC). Padrao = todo dia 1o as 06:00 de Brasilia.
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Mantenha DISABLED ate a execucao manual passar; depois mude para ENABLED.
+
+Resources:
+  # ------------------------------------------------------------------ armazenamento
+  TrustedBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${ProjectPrefix}-trusted
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${ProjectPrefix}-artifacts
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ------------------------------------------------------------------ notificacao e segredo
+  PipelineTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ProjectPrefix}-pipeline-avisos
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref NotificationEmail
+
+  PipelineTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref PipelineTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PermiteEventBridgePublicar
+            Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sns:Publish
+            Resource: !Ref PipelineTopic
+
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${ProjectPrefix}/rds
+      Description: Credenciais do RDS PostgreSQL usadas pelo job de carga.
+      SecretString: !Sub '{"host":"${DbHost}","port":"${DbPort}","dbname":"${DbName}","username":"${DbUser}","password":"${DbPassword}"}'
+
+  # ------------------------------------------------------------------ rede privada do job de carga
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref PrivateSubnetCidr
+      AvailabilityZone: !Ref PrivateSubnetAz
+      MapPublicIpOnLaunch: false
+      Tags: [{Key: Name, Value: !Sub "${ProjectPrefix}-glue-privada"}]
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnetId
+      Tags: [{Key: Name, Value: !Sub "${ProjectPrefix}-nat"}]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags: [{Key: Name, Value: !Sub "${ProjectPrefix}-rt-glue"}]
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  GlueSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Glue (job de carga) - trafego interno entre os nos + saida liberada
+      VpcId: !Ref VpcId
+      Tags: [{Key: Name, Value: !Sub "${ProjectPrefix}-glue-sg"}]
+
+  GlueSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GlueSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref GlueSecurityGroup
+      Description: Exigido pelo Glue - trafego entre os componentes do proprio job
+
+  RdsIngressFromGlue:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref GlueSecurityGroup
+      Description: PostgreSQL vindo do job Glue de carga (OET)
+
+  GlueNetworkConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      ConnectionInput:
+        Name: !Sub ${ProjectPrefix}-rede-privada
+        ConnectionType: NETWORK
+        PhysicalConnectionRequirements:
+          AvailabilityZone: !Ref PrivateSubnetAz
+          SubnetId: !Ref PrivateSubnet
+          SecurityGroupIdList: [!Ref GlueSecurityGroup]
+
+  # ------------------------------------------------------------------ IAM
+  GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectPrefix}-glue-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: glue.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: oet-dados-e-segredo
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BucketsDoProjeto
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:GetObjectVersion]
+                Resource:
+                  - !Sub arn:aws:s3:::${RawBucketName}/*
+                  - !Sub arn:aws:s3:::${ProjectPrefix}-trusted/*
+                  - !Sub arn:aws:s3:::${ProjectPrefix}-artifacts/*
+              - Sid: ListarBuckets
+                Effect: Allow
+                Action: [s3:ListBucket, s3:GetBucketLocation]
+                Resource:
+                  - !Sub arn:aws:s3:::${RawBucketName}
+                  - !Sub arn:aws:s3:::${ProjectPrefix}-trusted
+                  - !Sub arn:aws:s3:::${ProjectPrefix}-artifacts
+              - Sid: LerSegredoDoBanco
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DbSecret
+
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectPrefix}-stepfunctions-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: states.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: oet-orquestracao
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ExecutarJobsGlue
+                Effect: Allow
+                Action: [glue:StartJobRun, glue:GetJobRun, glue:GetJobRuns, glue:BatchStopJobRun]
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:job/${ProjectPrefix}-*
+              - Sid: Notificar
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref PipelineTopic
+              - Sid: RegraGerenciadaParaAguardarGlue
+                Effect: Allow
+                Action: [events:PutTargets, events:PutRule, events:DescribeRule]
+                Resource: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForGlueJobsRule
+              - Sid: LogsDaMaquina
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+
+  EventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectPrefix}-eventbridge-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: iniciar-execucao
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref PipelineStateMachine
+
+  # ------------------------------------------------------------------ jobs Glue
+  JobPython:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub ${ProjectPrefix}-etapa-python
+      Description: Job generico (Python Shell). O argumento --STEP escolhe a etapa (extract_*, transform_*, seed_dimensoes).
+      Role: !GetAtt GlueRole.Arn
+      GlueVersion: "3.0"
+      Command:
+        Name: pythonshell
+        PythonVersion: "3.9"
+        ScriptLocation: !Sub s3://${ProjectPrefix}-artifacts/scripts/run_step.py
+      MaxCapacity: 1
+      ExecutionProperty: {MaxConcurrentRuns: 8}
+      MaxRetries: 0
+      Timeout: 60
+      DefaultArguments:
+        --extra-py-files: !Sub s3://${ProjectPrefix}-artifacts/libs/oet_pipeline.zip
+        --additional-python-modules: pandas==2.2.2,pyarrow==16.1.0,openpyxl==3.1.5,python-dotenv==1.0.1
+        --enable-continuous-cloudwatch-log: "true"
+
+  JobLoad:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub ${ProjectPrefix}-carga-rds
+      Description: Carga trusted -> RDS PostgreSQL (roda dentro da VPC, via NAT). Staging + upsert, atomica.
+      Role: !GetAtt GlueRole.Arn
+      GlueVersion: "3.0"
+      Command:
+        Name: pythonshell
+        PythonVersion: "3.9"
+        ScriptLocation: !Sub s3://${ProjectPrefix}-artifacts/scripts/run_step.py
+      Connections: {Connections: [!Ref GlueNetworkConnection]}
+      MaxCapacity: 1
+      ExecutionProperty: {MaxConcurrentRuns: 1}
+      MaxRetries: 0
+      Timeout: 30
+      DefaultArguments:
+        --extra-py-files: !Sub s3://${ProjectPrefix}-artifacts/libs/oet_pipeline.zip
+        --additional-python-modules: pandas==2.2.2,pyarrow==16.1.0,psycopg2-binary==2.9.9,python-dotenv==1.0.1
+        --DB_SECRET_ARN: !Ref DbSecret
+        --enable-continuous-cloudwatch-log: "true"
+
+  JobSpark:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub ${ProjectPrefix}-gd-spark
+      Description: ANEEL GD (4,6 mi de usinas) em PySpark -> trusted (Parquet).
+      Role: !GetAtt GlueRole.Arn
+      GlueVersion: "4.0"
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${ProjectPrefix}-artifacts/scripts/glue_job_gd_pyspark.py
+      WorkerType: G.1X
+      NumberOfWorkers: 3
+      ExecutionProperty: {MaxConcurrentRuns: 1}
+      MaxRetries: 0
+      Timeout: 60
+      DefaultArguments:
+        --job-language: python
+        --enable-metrics: "true"
+        --enable-continuous-cloudwatch-log: "true"
+
+  # ------------------------------------------------------------------ Step Functions
+  StateMachineLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${ProjectPrefix}-pipeline
+      RetentionInDays: 90
+
+  PipelineStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub ${ProjectPrefix}-pipeline
+      StateMachineType: STANDARD
+      RoleArn: !GetAtt StateMachineRole.Arn
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogs.Arn
+      DefinitionString:
+        Fn::Sub:
+          - |
+__ASL__
+          - JobPython: !Ref JobPython
+            JobSpark: !Ref JobSpark
+            JobLoad: !Ref JobLoad
+            RawBucket: !Ref RawBucketName
+            TrustedBucket: !Ref TrustedBucket
+            TopicArn: !Ref PipelineTopic
+            Region: !Ref AWS::Region
+
+  # ------------------------------------------------------------------ EventBridge
+  ScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ProjectPrefix}-agenda-mensal
+      Description: Dispara o pipeline OET na agenda configurada.
+      ScheduleExpression: !Ref ScheduleExpression
+      State: !Ref ScheduleState
+      Targets:
+        - Id: pipeline
+          Arn: !Ref PipelineStateMachine
+          RoleArn: !GetAtt EventsRole.Arn
+          Input: "{}"
+
+  ExecucaoInterrompidaRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ProjectPrefix}-execucao-interrompida
+      Description: Avisa por SNS quando uma execucao estoura o tempo ou e abortada (casos que o Catch nao ve).
+      EventPattern:
+        source: [aws.states]
+        detail-type: [Step Functions Execution Status Change]
+        detail:
+          status: [TIMED_OUT, ABORTED]
+          stateMachineArn: [!Ref PipelineStateMachine]
+      Targets:
+        - Id: sns
+          Arn: !Ref PipelineTopic
+          InputTransformer:
+            InputPathsMap:
+              status: $.detail.status
+              execucao: $.detail.name
+            InputTemplate: '"Pipeline OET: a execucao <execucao> terminou com status <status>."'
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref PipelineStateMachine
+  TrustedBucketName:
+    Value: !Ref TrustedBucket
+  ArtifactsBucketName:
+    Value: !Ref ArtifactsBucket
+  TopicArn:
+    Value: !Ref PipelineTopic
+  DbSecretArn:
+    Value: !Ref DbSecret
+  ConsoleStepFunctions:
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${PipelineStateMachine}
