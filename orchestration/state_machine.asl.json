@@ -1,5 +1,5 @@
 {
-  "Comment": "Pipeline OET — Observatório de Energia e Transição Digital (Etapa 3)",
+  "Comment": "Pipeline",
   "StartAt": "VerificarSimulacao",
   "TimeoutSeconds": 14400,
   "States": {
