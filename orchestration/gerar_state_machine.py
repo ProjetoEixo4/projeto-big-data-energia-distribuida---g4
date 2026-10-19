@@ -1,24 +1,4 @@
-"""
-Gera orchestration/state_machine.asl.json (Amazon States Language) do pipeline OET.
 
-Mantido como gerador em vez de JSON escrito à mão porque as 6 extrações e os
-ramos paralelos repetem o mesmo bloco de Task/Retry — o gerador garante que
-todas tenham exatamente a mesma política de tentativas e de captura de erro.
-
-Os marcadores ${...} são substituídos pelo CloudFormation (DefinitionSubstitutions):
-    ${JobPython}  job Glue Python Shell genérico (parâmetro --STEP escolhe a etapa)
-    ${JobSpark}   job Glue Spark (geração distribuída)
-    ${JobLoad}    job Glue Python Shell dentro da VPC (carga no RDS)
-    ${RawBucket} ${TrustedBucket} ${TopicArn} ${Region}
-
-Fluxo:
-    Extracao (Parallel x6) -> Dimensoes -> Transformacao (Parallel x3) -> Tarifa -> Carga
-        -> NotificarSucesso -> Sucesso
-    qualquer erro (após Retry) -> NotificarFalha -> Falha
-    entrada {"simular_falha": true} -> FalhaSimulada (demonstra Retry + Catch + SNS)
-
-    python orchestration/gerar_state_machine.py
-"""
 from __future__ import annotations
 
 import json
