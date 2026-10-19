@@ -1,24 +1,4 @@
-"""
-Runner dos jobs AWS Glue "Python Shell" do OET.
 
-Um único script, parametrizado por --STEP, executa cada etapa do pipeline com o
-MESMO código que roda no computador do aluno (pacotes etl/, transform/, oet/,
-enviados ao Glue como --extra-py-files). O runner cuida só da "cola" com a nuvem:
-
-    1. baixa do S3 as entradas que a etapa precisa  (raw e/ou trusted)  -> /tmp/oet/data/...
-    2. executa o módulo da etapa (o script original, sem alterações)
-    3. envia ao S3 o que a etapa produziu            (raw e/ou trusted + relatórios)
-    4. imprime um resumo JSON (vai para o CloudWatch Logs = evidência de execução)
-
-Layout no S3
-    s3://<raw>/<fonte>/<arquivos>                       dado bruto, como veio da fonte
-    s3://<trusted>/<tabela>/<tabela>.parquet            tabela tratada (Spark: várias partes)
-    s3://<trusted>/_qualidade/<execucao>/<nome>.json    relatórios de qualidade por execução
-
-Parâmetros: --STEP <nome>  --RAW_BUCKET <b>  --TRUSTED_BUCKET <b>  [--EXECUCAO_REF <id>]
-            [--DB_SECRET_ARN <arn>]  (somente load_postgres)
-Qualquer falha -> exceção -> Glue marca o job como FAILED -> Step Functions aciona Retry/Catch.
-"""
 from __future__ import annotations
 
 import argparse
@@ -34,7 +14,7 @@ TABELAS_SEED = ["dim_tempo", "dim_uf", "dim_fonte_energia", "dim_modalidade"]
 TABELAS_CARGA = TABELAS_SEED + ["dim_distribuidora", "dim_clima_uf", "fato_geracao_uf",
                                 "fato_tarifa", "fato_matriz_energetica"]
 
-# módulo, argumentos, raw que precisa baixar, raw que produz, trusted que precisa, trusted que produz
+
 STEPS: dict[str, dict] = {
     "extract_aneel_gd":              dict(mod="etl.extract_aneel_gd", put_raw=["aneel_gd"]),
     "extract_aneel_gd_tecnico":      dict(mod="etl.extract_aneel_gd_tecnico", put_raw=["aneel_gd_tecnico"]),
