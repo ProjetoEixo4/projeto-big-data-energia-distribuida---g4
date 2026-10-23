@@ -145,8 +145,8 @@ def empacotar(destino: Path) -> Path:
         for pacote in PACOTES:
             for arq in sorted(p for p in (RAIZ / pacote).rglob("*") if p.suffix in (".py", ".sql")):
                 z.write(arq, arq.relative_to(RAIZ).as_posix())
-        z.write(RAIZ / "glue" / "__init__.py", "glue/__init__.py")
-        z.write(RAIZ / "glue" / "runner.py", "glue/runner.py")
+        z.write(RAIZ / "glue" / "__init__.py", "oet_runner/__init__.py")
+        z.write(RAIZ / "glue" / "runner.py", "oet_runner/runner.py")
     return destino
 
 

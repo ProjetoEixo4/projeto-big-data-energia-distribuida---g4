@@ -1,0 +1,17 @@
+Execução com falha forçada (--simular-falha), para provar o tratamento de erro
+(Retry + Catch) e a notificação SNS. Ver também 11_email_notificacoes_sucesso_e_falha.png.
+
+$ python infra/deploy_aws.py executar --simular-falha
+
+Execução iniciada: manual-20261022-205808-falha
+Acompanhe no console: https://sa-east-1.console.aws.amazon.com/states/home?region=sa-east-1#/v2/executions/details/arn:aws:states:sa-east-1:327137642283:execution:projeto-eixo4-g3-pipeline:manual-20261022-205808-falha
+  [20:58:08] RUNNING
+  [21:04:30] FAILED
+  Erro: PipelineOETFalhou — Veja a notificação SNS e o histórico da execução.
+Duração: 6.1 min
+
+Observação: a duração de 6,1 min (em vez de poucos segundos) é esperada — essa
+etapa tem a mesma política de Retry das demais (2 tentativas, com espera
+crescente de 60s), então o Step Functions tenta de novo automaticamente antes
+de desistir e acionar o Catch. Isso é, propositalmente, parte do que está
+sendo demonstrado: Retry, Catch e notificação funcionando juntos.

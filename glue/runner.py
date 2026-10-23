@@ -80,7 +80,10 @@ def baixar_prefixo(s3, bucket: str, prefixo: str, destino: Path) -> int:
 
 def enviar_arquivos(s3, bucket: str, base: Path, prefixo_s3: str, arquivos: list[Path]) -> int:
     for a in arquivos:
-        s3.upload_file(str(a), bucket, f"{prefixo_s3}/{a.relative_to(base).as_posix()}")
+        chave = a.relative_to(base).as_posix()
+        if prefixo_s3:
+            chave = f"{prefixo_s3}/{chave}"
+        s3.upload_file(str(a), bucket, chave)
     return len(arquivos)
 
 
