@@ -1,5 +1,5 @@
 -r requirements.txt
 pytest>=8.0
 moto[s3]>=5.0     # S3 falso em memória para o teste ponta a ponta
-pyspark==3.5.4   # job de geração distribuída (precisa de Java 11/17/21)
+pyspark==3.5.4  
 cfn-lint>=1.0    # validação do template CloudFormation
