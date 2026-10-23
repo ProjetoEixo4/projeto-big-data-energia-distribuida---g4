@@ -1,7 +1,9 @@
-"""Ponto de entrada do Glue: baixa e extrai o zip de código (etl/, transform/, oet/, oet_runner/) do S3
-antes de importar, em vez de confiar no --extra-py-files do Glue. O Python Shell às vezes não deixa
-esse mecanismo pronto a tempo quando várias execuções do MESMO Job começam juntas (como no nosso passo
-de extração, que dispara 6 em paralelo) -- o download manual abaixo é determinístico e não depende disso.
+"""Ponto de entrada do Glue. Antes de importar qualquer coisa, baixamos e extraímos do S3
+o zip com o código (etl/, transform/, oet/, oet_runner/), em vez de depender do
+--extra-py-files do Glue. No Python Shell, esse mecanismo às vezes não fica pronto a
+tempo quando várias execuções do mesmo Job sobem juntas (é o que acontece no nosso
+passo de extração, que dispara 6 em paralelo). Por isso o download manual abaixo:
+ele é determinístico e não depende desse comportamento.
 """
 from __future__ import annotations
 
