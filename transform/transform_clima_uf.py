@@ -1,29 +1,30 @@
 """
 Transformação — INMET (clima) → dim_clima_uf
 
-Cada ZIP anual do INMET tem ~600 CSVs, um por estação automática. O modelo
-guarda o clima por UF-mês (granularidade do projeto), então a agregação é
-feita em duas etapas, com unidades físicas coerentes com a geração solar:
+Cada ZIP anual do INMET traz ~600 CSVs, um por estação automática. Como o
+modelo guarda clima por UF-mês, agregamos em três passos, sempre com
+unidades compatíveis com geração solar:
 
-    1. Por estação e dia: irradiação global diária em kWh/m²/dia
-       (soma das leituras horárias em kJ/m² ÷ 3600). O INMET deixa a
-       radiação EM BRANCO à noite (não grava zero), então a validade do
-       dia é medida só na janela diurna (10h–22h UTC, que cobre o dia solar
-       do Acre ao litoral): o dia exige MIN_HORAS_DIA_VALIDO leituras nessa
-       janela; fora dela, vazio equivale a 0. Totais acima de
-       MAX_KWH_DIA (fisicamente impossíveis) são tratados como erro de sensor.
+    1. Por estação e dia: irradiação global diária em kWh/m²/dia (soma das
+       leituras horárias em kJ/m² ÷ 3600). O INMET não grava a radiação à
+       noite — deixa em branco, não zero. Por isso a validade do dia é
+       checada só na janela diurna (10h–22h UTC, que cobre do Acre ao
+       litoral): exige-se MIN_HORAS_DIA_VALIDO leituras nesse intervalo;
+       fora dele, vazio vira 0. Totais acima de MAX_KWH_DIA são
+       fisicamente impossíveis e tratados como erro de sensor.
     2. Por estação e mês: média dos dias válidos (irradiação), média da
        temperatura e soma da precipitação.
-    3. Por UF e mês: média entre as estações da UF. Registra-se
-       qtd_estacoes e cobertura_pct (percentual das horas DIURNAS do mês
-       com radiação válida, média das estações) para o usuário do dado saber
-       o quanto confiar em cada UF-mês; amostra_reduzida = menos de 3
-       estações OU cobertura abaixo de 50 %.
+    3. Por UF e mês: média entre as estações da UF. Guardamos qtd_estacoes
+       e cobertura_pct (percentual das horas diurnas do mês com radiação
+       válida, média das estações) para quem for usar o dado saber o
+       quanto confiar em cada UF-mês. amostra_reduzida marca menos de 3
+       estações ou cobertura abaixo de 50%.
 
-A UF vem do NOME do arquivo: INMET_<REGIÃO>_<UF>_<código>_... . A região
-pode ter 1 ou 2 letras (CO, N, NE, S, SE) e, a partir de 2025, o ZIP
-guarda os arquivos dentro de uma pasta "2025/" — a expressão regular
-cobre os dois casos.
+A UF é extraída do NOME do arquivo: INMET_<REGIÃO>_<UF>_<código>_... . A
+região pode ter 1 ou 2 letras (CO, N, NE, S, SE) e, a partir de 2025, o
+ZIP passou a guardar os arquivos dentro de uma pasta "2025/" — a regex
+cobre os dois formatos.
+"""
 
 Uso:
     python transform/transform_clima_uf.py
