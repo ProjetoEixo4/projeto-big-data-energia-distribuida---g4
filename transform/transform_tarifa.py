@@ -1,33 +1,36 @@
 """
 Transformação — ANEEL Tarifas → fato_tarifa
 
-Pergunta que a tabela responde: quanto custa, em média, o kWh para o consumidor
-residencial de cada UF em cada mês, em valores nominais e em valores constantes?
+Pergunta que a tabela responde: quanto custa, em média, o kWh para o
+consumidor residencial de cada UF, mês a mês, em valores nominais e em
+valores constantes?
 
-Recorte tarifário (cada linha abaixo elimina uma duplicidade real do arquivo da
-ANEEL, que traz ~328 mil linhas para ~2 mil tarifas "relevantes"):
+Recorte tarifário (cada linha abaixo elimina uma duplicidade real do arquivo
+da ANEEL, que traz ~328 mil linhas para ~2 mil tarifas "relevantes"):
     DscSubGrupo == B1                      baixa tensão residencial
-    DscClasse == Residencial, DscSubClasse == Residencial   (exclui Baixa Renda e Tarifa Social)
+    DscClasse == Residencial, DscSubClasse == Residencial
+                                            (exclui Baixa Renda e Tarifa Social)
     DscModalidadeTarifaria == Convencional (exclui Branca e pré-pagamento)
-    DscBaseTarifaria == 'Tarifa de Aplicação'  (o que a conta de luz cobra; exclui 'Base Econômica')
-    DscDetalhe == NomPostoTarifario == 'Não se aplica'   (exclui o componente SCEE e postos horários)
+    DscBaseTarifaria == 'Tarifa de Aplicação'
+                                            (o que a conta de luz cobra de
+                                            fato; exclui 'Base Econômica')
+    DscDetalhe == NomPostoTarifario == 'Não se aplica'
+                                            (exclui o componente SCEE e
+                                            postos horários)
 
 Cálculo:
-    1. tarifa (R$/kWh) = (VlrTUSD + VlrTE) / 1000 (a ANEEL publica em R$/MWh).
-    2. Cada reajuste vale a partir de DatInicioVigencia até o próximo reajuste da
-       mesma distribuidora (as vigências do arquivo têm 6 sobreposições e 2 lacunas;
-       "vale o último reajuste já iniciado" resolve ambas).
-    3. Série DIÁRIA por distribuidora, média por mês (ponderada pelos dias de
-       cada tarifa dentro do mês — um reajuste no dia 20 pesa 1/3 no mês).
-    4. Distribuidora → UF: uma distribuidora pode atender mais de uma UF.
-       A tarifa da UF é a média das distribuidoras que a atendem, PONDERADA pelo
-       nº de usinas solares conectadas à distribuidora naquela UF (proxy da base
-       de consumidores; pesos fixos no tempo para a série não oscilar por peso).
-    5. Deflação: tarifa_deflacionada = tarifa × IPCA(dez/2025) / IPCA(mês),
-       ou seja, em reais de dez/2025 (IPCA, SIDRA 1737). Sem IPCA disponível
-       o script falha — a coluna não é mais uma cópia da nominal.
-
-Depende de transform_geracao_uf.py (dim_distribuidora_uf) e de extract_ipca.py.
+    1. tarifa (R$/kWh) = (VlrTUSD + VlrTE) / 1000 — a ANEEL publica em
+       R$/MWh.
+    2. Cada reajuste vale a partir de DatInicioVigencia até o próximo
+       reajuste da mesma distribuidora. As vigências do arquivo têm 6
+       sobreposições e 2 lacunas; a regra "vale o último reajuste já
+       iniciado" resolve as duas.
+    3. Montamos uma série DIÁRIA por distribuidora e tiramos a média por
+       mês, ponderada pelos dias de cada tarifa dentro do mês — um
+       reajuste no dia 20 pesa 1/3 no mês.
+    4. Distribuidora → UF: como uma distribuidora pode atender mais de uma
+       UF, a tarifa da UF é a média das distribuidoras que a atendem,
+       PONDERADA pelo número de usinas solares conectadas à
 
 Uso:
     python transform/transform_tarifa.py
