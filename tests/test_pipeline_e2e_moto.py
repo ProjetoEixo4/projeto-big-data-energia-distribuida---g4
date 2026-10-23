@@ -1,15 +1,7 @@
-"""
-Teste ponta a ponta do pipeline na "nuvem simulada" (moto = S3 falso em memória):
 
-    raw S3 --> seed --> [GD em Spark] --> clima --> matriz --> tarifa --> load PostgreSQL
-
-Usa o runner real (glue/runner.py) e os scripts reais. As etapas de EXTRAÇÃO
-dependem de sites externos e ficam fora; o raw é semeado com os arquivos já
-baixados em data/raw. Requer: moto, boto3, pyspark+Java, PostgreSQL de teste
-(variáveis DB_*).
 
     python tests/test_pipeline_e2e_moto.py
-"""
+
 from __future__ import annotations
 
 import os
