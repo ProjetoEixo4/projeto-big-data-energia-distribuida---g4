@@ -17,7 +17,7 @@ from transform import transform_matriz_energetica as matriz
 FIXTURE_IPCA = "tests/fixtures/ipca_sidra_1737_201912_202512.json"
 
 
-# ----------------------------------------------------------------------------- clima
+# -- clima
 @pytest.mark.parametrize("nome,esperado", [
     ("INMET_CO_DF_A001_BRASILIA_01-01-2020_A_31-12-2020.CSV", "DF"),
     ("INMET_S_RS_A801_PORTO ALEGRE_01-01-2022_A_31-12-2022.CSV", "RS"),      # região de 1 letra (bug antigo)
@@ -56,7 +56,7 @@ def test_irradiacao_absurda_vira_nulo():
     assert np.isnan(df["irradiacao_kwh_m2_dia"].iloc[0])
 
 
-# ----------------------------------------------------------------------------- tarifa
+# - tarifa
 def _linhas_tarifa(cnpj, inicio, tusd, te):
     return {"NumCNPJDistribuidora": cnpj, "DatInicioVigencia": inicio, "DscSubGrupo": "B1", "DscClasse": "Residencial",
             "DscSubClasse": "Residencial", "DscModalidadeTarifaria": "Convencional",
@@ -98,7 +98,7 @@ def test_deflacao_traz_para_reais_de_dez_2025():
         tar.deflacionar(fato.assign(id_tempo=[201001, 202512]), ipca)             # mês sem índice: falha explícita
 
 
-# ----------------------------------------------------------------------------- geração
+#  geração
 def _usinas(linhas):
     cols = ["CodEmpreendimento", "SigUF", "DscModalidadeHabilitado", "DscClasseConsumo",
             "MdaPotenciaInstaladaKW", "DthAtualizaCadastralEmpreend"]
@@ -138,7 +138,7 @@ def test_data_de_conexao_tem_prioridade_sobre_cadastro():
     assert resumo["pct_usinas_data_conexao"] == 50.0
 
 
-# ----------------------------------------------------------------------------- dimensões e carga
+#  dimensões e carga
 def test_dim_modalidade_estavel_e_completa():
     d = seed_dimensoes.gerar_dim_modalidade()
     assert len(d) == 50 and d["id_modalidade"].tolist() == list(range(1, 51))
@@ -161,7 +161,7 @@ def test_validacao_da_carga_detecta_problemas():
         carga.validar({"dim_uf": uf.iloc[0:0]})
 
 
-# ----------------------------------------------------------------------------- matriz elétrica (BEN)
+#  matriz elétrica (BEN)
 def test_matriz_eletrica_decomposicao(tmp_path):
     cols = ["grupo", "Hidráulica - GWh", "Eólica - GWh", "Solar Fotovoltaica - GWh", "Eletricidade - GWh"]
     d = pd.DataFrame([
