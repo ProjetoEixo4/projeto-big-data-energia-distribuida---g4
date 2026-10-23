@@ -2,29 +2,26 @@
 Transformação — ANEEL Geração Distribuída → fato_geracao_uf (+ dim_distribuidora,
 dim_distribuidora_uf)
 
-O arquivo bruto (empreendimento-geracao-distribuida.parquet) é um CADASTRO:
-uma fotografia atual das usinas, sem data de conexão. Para reconstruir a série
-mensal 2020-2025 o pipeline usa, nesta ordem de preferência:
+O arquivo bruto (empreendimento-geracao-distribuida.parquet) é um CADASTRO: uma
+fotografia atual das usinas, sem data de conexão. Para reconstruir a série
+mensal de 2020 a 2025, o pipeline busca essa data nesta ordem de preferência:
 
-    1. DatConexao da tabela técnica fotovoltaica da ANEEL (extract_aneel_gd_tecnico.py),
-       ligada por CodEmpreendimento = CodGeracaoDistribuida — data real de conexão;
-    2. (fallback, só para usinas sem correspondência ou se o arquivo técnico não
-       foi baixado) DthAtualizaCadastralEmpreend, que mede a última atualização
-       do cadastro e NÃO a conexão. O relatório de qualidade registra quantos %
-       das usinas e da potência caíram em cada caso; sem o arquivo técnico a série
-       fica marcada como `serie_aproximada = true`.
+    1. DatConexao da tabela técnica fotovoltaica da ANEEL
+       (extract_aneel_gd_tecnico.py), cruzada por CodEmpreendimento =
+       CodGeracaoDistribuida — essa é a data real de conexão.
+    2. Como fallback (só quando a usina não tem correspondência, ou o arquivo
+       técnico não foi baixado), usamos DthAtualizaCadastralEmpreend. Essa
+       coluna mede a última atualização do cadastro, não a conexão em si.
+       O relatório de qualidade mostra quanto % das usinas e da potência caiu
+       em cada caso; sem o arquivo técnico, a série inteira é marcada como
+       `serie_aproximada = true`.
 
-Decisões de modelagem (todas visíveis no relatório de qualidade):
-    - Escopo SOLAR: só SigTipoGeracao == 'UFV' (99,98 % do cadastro). O projeto
-      trata de energia solar distribuída; misturar eólica/térmica/hidro (≈0,02 %)
-      distorceria o conceito sem ganho analítico.
-    - O fato é um ESTOQUE ACUMULADO mensal, não um fluxo de "cadastros do mês":
-      potência instalada e nº de conexões acumulados até o fim de cada mês, mais
-      as colunas de fluxo (novas conexões no mês). Usinas conectadas antes de
-      jan/2020 entram no saldo inicial. A grade é completa (todo mês para toda
-      combinação UF×modalidade que existe), então não há "buracos" na série.
-    - Datas anteriores a 2012 (início da REN 482) ou posteriores ao último mês do
-      recorte são consideradas inválidas (ex.: 1900-01-01) e a usina cai no fallback.
+Decisões de modelagem (todas documentadas no relatório de qualidade):
+    - Escopo SOLAR: só entra SigTipoGeracao == 'UFV' (99,98% do cadastro). O
+      projeto é sobre energia solar distribuída, então misturar eólica,
+      térmica e hidro (os ~0,02% restantes) só distorceria o conceito, sem
+      agregar nada à análise.
+    - O fato representa um ESTOQUE ACUMULADO mensal, não
 
 Uso:
     python transform/transform_geracao_uf.py
