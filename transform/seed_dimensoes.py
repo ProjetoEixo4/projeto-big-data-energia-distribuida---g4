@@ -1,25 +1,29 @@
 """
 Transformação — Seed das dimensões estáticas: dim_tempo, dim_uf, dim_fonte_energia
 
-dim_tempo: calendário mensal 2020-01 a 2025-12 (72 linhas). id_tempo no formato
-AAAAMM (ex.: 202001), usado como chave em todas as tabelas fato/dim_clima.
+dim_tempo: calendário mensal de 2020-01 a 2025-12 (72 linhas). id_tempo no
+formato AAAAMM (ex.: 202001), usado como chave em todas as tabelas fato e em
+dim_clima.
 
 dim_uf: as 27 UFs do Brasil. Nome, região, população e área vêm de uma tabela
-de referência estática (Censo IBGE 2022 / malha territorial IBGE) — esses
-valores mudam pouco e não justificam uma chamada de API própria. O PIB per
-capita é CALCULADO a partir do PIB total extraído da API SIDRA (tabela 5938,
-variável 37, nível UF) dividido pela população de referência, usando o ano
-mais recente disponível no arquivo baixado por extract_ibge_contas_regionais.py.
+de referência estática (Censo IBGE 2022 / malha territorial IBGE), já que
+esses valores mudam pouco e não justificam uma chamada de API dedicada. Já o
+PIB per capita é calculado: pegamos o PIB total extraído da API SIDRA (tabela
+5938, variável 37, nível UF) e dividimos pela população de referência,
+usando o ano mais recente disponível no arquivo baixado por
+extract_ibge_contas_regionais.py.
 
-dim_fonte_energia: as 4 fontes da geração elétrica nacional usadas em
-fato_matriz_energetica (hidráulica, eólica, solar fotovoltaica e térmica/outras; a
-categoria 'Mista' reconhece que térmica/outras mistura biomassa e fósseis).
+dim_fonte_energia: as 4 fontes de geração elétrica nacional usadas em
+fato_matriz_energetica — hidráulica, eólica, solar fotovoltaica e
+térmica/outras. A categoria "Mista" existe porque térmica/outras mistura
+biomassa e fósseis.
 
-dim_modalidade: catálogo FIXO (5 modalidades de GD x 10 classes de consumo = 50
-linhas) com id estável. Antes, a dimensão era "descoberta" nos dados e o id era
-um SERIAL do banco — qualquer carga nova podia renumerar e quebrar o fato.
-Agora o id é determinístico (posição no catálogo) e valores desconhecidos caem
-em "Não informado"/"Outras" em vez de criar linhas novas sem controle.
+dim_modalidade: catálogo fixo (5 modalidades de GD x 10 classes de consumo =
+50 linhas) com id estável. Antes, essa dimensão era "descoberta" a partir dos
+dados e o id vinha de um SERIAL do banco, então qualquer carga nova podia
+renumerar tudo e quebrar o fato. Agora o id é determinístico (reflete a
+posição no catálogo), e valores desconhecidos caem em "Não informado" /
+"Outras" em vez de gerar linhas novas sem controle.
 
 Uso:
     python transform/seed_dimensoes.py
