@@ -1,8 +1,7 @@
--- =============================================================================
+
 -- Modelo Dimensional — Constelação de Fatos (granularidade UF x mês)
--- Observatório de Energia e Transição Digital (OET)  |  versão Etapa 3
--- Idempotente: pode ser executado várias vezes (CREATE ... IF NOT EXISTS).
--- =============================================================================
+
+
 
 CREATE TABLE IF NOT EXISTS dim_tempo (
     id_tempo    INTEGER PRIMARY KEY,                 -- AAAAMM
@@ -87,10 +86,10 @@ CREATE TABLE IF NOT EXISTS fato_matriz_energetica (
     PRIMARY KEY (id_tempo, cod_fonte)
 );
 
--- Trilha de auditoria do pipeline (Etapa 3): uma linha por tabela carregada por execução
+-- Trilha de teste do pipeline (Etapa 3): uma linha por tabela carregada por execução
 CREATE TABLE IF NOT EXISTS etl_execucao (
     id_execucao   BIGSERIAL PRIMARY KEY,
-    execucao_ref  VARCHAR(80) NOT NULL,              -- ex.: nome da execução do Step Functions
+    execucao_ref  VARCHAR(80) NOT NULL,              
     tabela        VARCHAR(60) NOT NULL,
     linhas        INTEGER NOT NULL,
     inseridas     INTEGER,
