@@ -1,9 +1,5 @@
--- =============================================================================
--- Migração Etapa 2 -> Etapa 3 (rode ANTES de 01_ddl_modelo_dimensional.sql)
--- Seguro em banco vazio e em banco da Etapa 2: remove apenas as tabelas cujo
--- esquema/chave mudou (as cargas são refeitas pelo pipeline, que é idempotente)
--- e mantém as dimensões que continuam válidas.
--- =============================================================================
+
+-- Migração Etapa 2 -> Etapa 3 
 BEGIN;
 
 DROP TABLE IF EXISTS fato_geracao_uf        CASCADE;  -- passou de "cadastros do mês" para estoque acumulado + fluxo
