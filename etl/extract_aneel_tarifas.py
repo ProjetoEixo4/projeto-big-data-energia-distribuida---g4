@@ -4,11 +4,7 @@ Baixa o CSV de tarifas homologadas por distribuidora, disponível no portal
 de dados abertos da ANEEL.
 
 Esse arquivo é o histórico completo de tarifas de todas as distribuidoras
-do Brasil e pode ser grande (dezenas a centenas de MB, dependendo da
-atualização da base). O download é feito em streaming, com progresso
-impresso a cada alguns MB, para deixar claro que o processo está
-avançando e não travado. Pode levar alguns minutos dependendo da sua
-conexão — deixe rodar até o fim.
+do Brasil. O download é feito em streaming.
 
 Uso:
     python etl/extract_aneel_tarifas.py

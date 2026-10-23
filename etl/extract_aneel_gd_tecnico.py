@@ -1,12 +1,7 @@
 """
 Extração — ANEEL GD, informações técnicas das usinas fotovoltaicas
 
-O arquivo principal de GD (extract_aneel_gd.py) é um cadastro SEM data de
-conexão. Esta tabela complementar traz, por usina fotovoltaica,
-CodGeracaoDistribuida (mesmo código de CodEmpreendimento do cadastro) e
-DatConexao — a data em que a usina entrou em operação. É ela que permite
-reconstruir a série mensal de capacidade instalada 2020-2025 (ver
-transform_geracao_uf.py).
+(extract_aneel_gd.py)
 
 Uso:
     python etl/extract_aneel_gd_tecnico.py

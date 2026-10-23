@@ -1,20 +1,6 @@
 """
 Camada de E/S compartilhada entre execução local e AWS Glue.
 
-Todos os scripts de transformação leem a camada RAW e gravam a camada
-TRUSTED em disco, relativos a OET_DATA_DIR (padrão: ./data). Localmente isso
-é a pasta data/ do repositório; no Glue, o runner (glue/runner.py) aponta
-OET_DATA_DIR para /tmp/oet e sincroniza com o S3 antes e depois do job:
-
-    s3://<bucket-raw>/<fonte>/...      <-->  $OET_DATA_DIR/raw/<fonte>/...
-    s3://<bucket-trusted>/<tabela>/... <-->  $OET_DATA_DIR/trusted/<tabela>.parquet
-
-Assim o MESMO código roda no notebook do aluno e no Glue — o que se testa
-localmente é exatamente o que vai para a nuvem.
-
-A camada TRUSTED é gravada em Parquet (colunar, comprimido, com esquema
-embutido) e não mais em CSV: preserva tipos (CNPJ como texto, datas, booleanos)
-e é o formato que o Athena/Spark leem sem conversão.
 """
 from __future__ import annotations
 

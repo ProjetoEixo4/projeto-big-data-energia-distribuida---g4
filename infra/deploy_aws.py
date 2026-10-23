@@ -1,19 +1,4 @@
-"""
-Implantação do pipeline OET na AWS (CloudFormation + código dos jobs) e execução de teste.
 
-Pré-requisitos (uma vez):  pip install boto3   e   credenciais configuradas
-(aws configure  ou variáveis AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION=sa-east-1).
-
-Comandos (ordem recomendada):
-    python infra/deploy_aws.py descobrir                     mostra o que será usado (RDS, VPC, sub-rede, SG)
-    python infra/deploy_aws.py implantar --email voce@x.com  cria/atualiza a stack (pede a senha do RDS)
-    python infra/deploy_aws.py artefatos                     empacota e envia o código para o S3 (rode de novo a cada mudança no código)
-    python infra/deploy_aws.py enviar-raw --origem data/raw/epe_ben --prefixo epe_ben   envia o BEN (manual) ao bucket RAW
-    python infra/deploy_aws.py executar                      inicia o pipeline e acompanha até o fim
-    python infra/deploy_aws.py executar --simular-falha      prova o Retry/Catch/SNS
-    python infra/deploy_aws.py agenda --ligar | --desligar   liga/desliga a execução mensal automática
-    python infra/deploy_aws.py destruir                      remove a stack (buckets ficam, por segurança)
-"""
 from __future__ import annotations
 
 import argparse

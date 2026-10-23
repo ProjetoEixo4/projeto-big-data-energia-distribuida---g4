@@ -1,16 +1,16 @@
 """
 Carga — camada trusted (Parquet) -> RDS PostgreSQL, atômica e idempotente.
 
-Como funciona, para cada tabela (na ordem das chaves estrangeiras):
-    1. VALIDA o Parquet antes de tocar no banco: não vazio, colunas esperadas,
+Pensamos em como isso funcionaria, para cada tabela (na ordem das chaves estrangeiras):
+    1. Validamos o Parquet antes de ir no banco: não vazio, colunas esperadas,
        chave primária sem duplicata, chaves estrangeiras existentes nas
        dimensões que serão carregadas. Falha cedo com mensagem legível.
-    2. Cria uma tabela temporária (staging) e carrega o lote inteiro com COPY
+    2. Criamos uma tabela temporária (staging) e carregamos o lote inteiro com COPY
        (ordens de grandeza mais rápido que INSERT linha a linha).
-    3. Faz UPSERT do staging na tabela final (INSERT ... ON CONFLICT DO UPDATE),
-       gravando apenas linhas novas ou que de fato mudaram
-       (IS DISTINCT FROM) e contando inseridas x atualizadas.
-    4. Registra a contagem em etl_execucao (trilha de auditoria).
+    3. Fazemos o UPSERT do staging na tabela final (INSERT ... ON CONFLICT DO UPDATE),
+       gravamos apenas linhas novas ou que de fato mudaram
+       (IS DISTINCT FROM) e contamos inseridas x atualizadas.
+    4. Registramos a contagem em etl_execucao (trilha de auditoria).
 Tudo em UMA transação: se qualquer etapa falhar, nada é gravado (rollback).
 Rodar de novo com os mesmos dados não altera o banco (0 inseridas, 0 atualizadas).
 

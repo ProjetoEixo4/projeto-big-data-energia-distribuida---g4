@@ -1,18 +1,12 @@
 """
 AWS Glue (PySpark) — ANEEL Geração Distribuída -> camada trusted
 
-Mesma regra de negócio de transform/transform_geracao_uf.py (pandas), reescrita em
-Spark porque esta é a única fonte realmente volumosa do projeto (4,6 milhões de
-usinas; o cadastro cresce todo mês) — é onde processamento distribuído se justifica.
-A equivalência com a versão pandas é verificada por tests/test_equivalencia_spark.py.
 
 Entradas  (S3 raw):      aneel_gd/*.parquet, aneel_gd_tecnico/*.parquet (opcional)
 Entradas  (S3 trusted):  dim_modalidade/ (gerada por seed_dimensoes)
 Saídas    (S3 trusted):  dim_distribuidora/, dim_distribuidora_uf/, fato_geracao_uf/,
                          _qualidade/geracao.json
 
-Parâmetros do job: --RAW_BUCKET, --TRUSTED_BUCKET, --EXECUCAO_REF
-Execução local (teste): python glue/glue_job_gd_pyspark.py --RAW_DIR data/raw --TRUSTED_DIR data/trusted
 """
 from __future__ import annotations
 
