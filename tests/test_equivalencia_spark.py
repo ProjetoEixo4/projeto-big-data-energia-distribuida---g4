@@ -1,9 +1,9 @@
 """
-Prova de equivalência: o job PySpark (Glue) e o script pandas produzem a MESMA
+o job PySpark (Glue) e o script pandas produzem a MESMA
 fato_geracao_uf. Rodado sobre os dados reais (data/raw + data/trusted) quando
 existem; caso contrário é ignorado.
 
-    python tests/test_equivalencia_spark.py      (precisa de Java + pyspark)
+    python tests/test_equivalencia_spark.py     
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ sys.path.insert(0, str(RAIZ / "glue"))
 
 
 def sintetico() -> None:
-    """Equivalência no caminho COM DatConexao (arquivo técnico), que os dados reais ainda não exercitam."""
+  
     import os
     import glue_job_gd_pyspark as job
     from pyspark.sql import SparkSession
