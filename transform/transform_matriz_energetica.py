@@ -1,23 +1,31 @@
 """
 Transformação — EPE BEN → fato_matriz_energetica (geração ELÉTRICA nacional por fonte)
 
-Pergunta: qual a participação da energia solar na eletricidade gerada no Brasil, ano a
-ano, frente às demais fontes? Para isso usa-se a matriz "em unidades comerciais" do BEN,
-que traz, em GWh, a produção de cada fonte elétrica e a coluna de eletricidade gerada
-pelas centrais elétricas:
+Pergunta que essa tabela responde: qual a participação da energia solar na
+eletricidade gerada no Brasil, ano a ano, frente às demais fontes? Para isso
+usamos a matriz "em unidades comerciais" do BEN, que traz em GWh a produção de
+cada fonte elétrica e a coluna de eletricidade gerada pelas centrais elétricas:
 
-    Hidráulica / Eólica / Solar fotovoltaica  = linha "Produção" das colunas "<fonte> - GWh"
-                                                 (o BEN contabiliza essas fontes a 100 % na transformação)
-    Total de eletricidade gerada              = Centrais Elétricas de Serviço Público
-                                                 + Centrais Elétricas Autoprodutoras (coluna "Eletricidade - GWh")
-    Térmica e outras                          = total − hidráulica − eólica − solar
-                                                 (gás, carvão, nuclear, biomassa, derivados: o arquivo
-                                                 não os separa em GWh, então ficam como resíduo)
+    Hidráulica / Eólica / Solar fotovoltaica  = linha "Produção" das colunas
+                                                 "<fonte> - GWh" (o BEN já
+                                                 contabiliza essas fontes a
+                                                 100% na transformação)
+    Total de eletricidade gerada              = Centrais Elétricas de Serviço
+                                                 Público + Centrais Elétricas
+                                                 Autoprodutoras (coluna
+                                                 "Eletricidade - GWh")
+    Térmica e outras                          = total − hidráulica − eólica
+                                                 − solar (gás, carvão,
+                                                 nuclear, biomassa,
+                                                 derivados: o arquivo não
+                                                 separa isso em GWh, então
+                                                 vira resíduo)
 
-A divisão por tipo de central é preservada: autoprodutoras concentram a geração
-distribuída (consumidores que geram a própria energia), serviço público as usinas
-despachadas/centralizadas. É um indicador NACIONAL e ANUAL (não tem UF): id_tempo =
-AAAA12 (dezembro do ano-base), a mesma convenção da dimensão tempo mensal.
+A divisão por tipo de central fica preservada: autoprodutoras concentram a
+geração distribuída (consumidores que geram a própria energia), enquanto
+serviço público são as usinas despachadas/centralizadas. É um indicador
+NACIONAL e ANUAL — não tem UF —, com id_tempo = AAAA12 (dezembro do ano-base),
+seguindo a mesma convenção da dimensão tempo mensal.
 
 Uso:
     python transform/transform_matriz_energetica.py
